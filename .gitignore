@@ -43,4 +43,9 @@ dist/
 build/
 
 # Local reference repositories
-MedicalScribe-References/
+MedicalScribe-References/.vs/
+*.user
+TestResults/
+artifacts/
+*.binlog
+.pyright/

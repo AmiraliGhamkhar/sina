@@ -121,3 +121,17 @@ Do not blindly copy their architecture.
 Do not preserve their UI/framework choices when they conflict
 with this project's architecture.
 Do not copy code without preserving the applicable license/attribution.
+---
+
+## Phase 1 usage log (2026-09-10)
+
+This map was followed during the Phase 1 inspection. Per-reference take/leave
+decisions, conflict resolutions, and the exact files where adapted concepts
+landed are recorded in:
+
+- `docs/ASSESSMENT.md` — analysis + implementation order
+- `docs/THIRD_PARTY_NOTICES.md` — attribution index (all four references are MIT)
+- `docs/ARCHITECTURE.md` — target design (only reference *patterns* survive here)
+
+No code was copied from reference repositories; SpeakType-derived client
+patterns carry in-file attribution headers.

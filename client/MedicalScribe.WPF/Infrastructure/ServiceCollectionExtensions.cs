@@ -1,0 +1,52 @@
+using MedicalScribe.WPF.Audio;
+using MedicalScribe.WPF.Hotkeys;
+using MedicalScribe.WPF.Services;
+using MedicalScribe.WPF.Settings;
+using MedicalScribe.WPF.ViewModels;
+using Microsoft.Extensions.DependencyInjection;
+
+namespace MedicalScribe.WPF.Infrastructure;
+
+public static class ServiceCollectionExtensions
+{
+    public static IServiceCollection AddMedicalScribeClient(this IServiceCollection services)
+    {
+        var settingsStore = new JsonSettingsStore();
+        settingsStore.Load();
+
+        services.AddSingleton(settingsStore);
+        services.AddSingleton(settingsStore.Current);
+        services.AddSingleton<ILoggerService, FileLogger>();
+        services.AddSingleton<IUiDispatcher, WpfUiDispatcher>();
+
+        services.AddSingleton<TokenStore>();
+        services.AddSingleton<IAccessTokenSource>(sp => sp.GetRequiredService<TokenStore>());
+        services.AddSingleton(sp =>
+        {
+            var http = new HttpClient
+            {
+                BaseAddress = new Uri(settingsStore.Current.ServerUrl),
+            };
+            return new ApiClient(http, sp.GetRequiredService<IAccessTokenSource>(), sp.GetRequiredService<ILoggerService>());
+        });
+        services.AddSingleton<IApiClient>(sp => sp.GetRequiredService<ApiClient>());
+
+        services.AddSingleton<IAuthorizationService, AuthorizationService>();
+        services.AddSingleton<IServerStatusService, ServerStatusService>();
+        services.AddSingleton<IAudioCaptureService, UnavailableAudioCaptureService>();
+        services.AddSingleton<IHotkeyService, Win32HotkeyService>();
+
+        services.AddSingleton<LoginViewModel>();
+        services.AddSingleton<DashboardViewModel>();
+        services.AddSingleton<PatientEncounterViewModel>();
+        services.AddSingleton<RecorderViewModel>();
+        services.AddSingleton<LiveTranscriptViewModel>();
+        services.AddSingleton<MedicalEditorViewModel>();
+        services.AddSingleton<ReportViewModel>();
+        services.AddSingleton<TemplatesViewModel>();
+        services.AddSingleton<AiSettingsViewModel>();
+        services.AddSingleton<UserSettingsViewModel>();
+        services.AddSingleton<MainViewModel>();
+        return services;
+    }
+}

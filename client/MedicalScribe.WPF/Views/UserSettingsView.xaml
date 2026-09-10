@@ -1,0 +1,47 @@
+<UserControl x:Class="MedicalScribe.WPF.Views.UserSettingsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="24">
+        <StackPanel MaxWidth="640">
+            <TextBlock Text="User settings" Style="{StaticResource SectionTitle}"/>
+
+            <Border Style="{StaticResource Card}">
+                <StackPanel>
+                    <TextBlock Text="Server URL" Style="{StaticResource FieldLabel}"/>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBox Text="{Binding ServerUrl, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,8,0"/>
+                        <Button Grid.Column="1" Content="Test" Style="{StaticResource SecondaryButton}" Command="{Binding TestConnectionCommand}"/>
+                    </Grid>
+
+                    <TextBlock Text="Preferred dictation language" Style="{StaticResource FieldLabel}"/>
+                    <ComboBox ItemsSource="{Binding Languages}" SelectedItem="{Binding PreferredLanguage}" Width="160" HorizontalAlignment="Left"/>
+
+                    <TextBlock Text="Global hotkey — toggle recording" Style="{StaticResource FieldLabel}"/>
+                    <StackPanel Orientation="Horizontal">
+                        <TextBox Text="{Binding Hotkey, UpdateSourceTrigger=PropertyChanged}" Width="220" Margin="0,0,12,0"/>
+                        <CheckBox Content="enabled" IsChecked="{Binding HotkeysEnabled}" VerticalAlignment="Center"/>
+                    </StackPanel>
+
+                    <TextBlock Text="Theme" Style="{StaticResource FieldLabel}"/>
+                    <ComboBox ItemsSource="{Binding Themes}" SelectedItem="{Binding Theme}" Width="160" HorizontalAlignment="Left"/>
+
+                    <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                        <CheckBox Content="auto-start transcription with recorder" IsChecked="{Binding AutoStart}" Margin="0,0,18,0"/>
+                        <CheckBox Content="verbose diagnostics logging (never logs transcripts)" IsChecked="{Binding VerboseLogging}"/>
+                    </StackPanel>
+
+                    <StackPanel Orientation="Horizontal" Margin="0,16,0,0">
+                        <Button Content="Save" Command="{Binding SaveCommand}"/>
+                    </StackPanel>
+
+                    <TextBlock Text="{Binding Message}" Foreground="{StaticResource Accent}" Margin="0,8,0,0"/>
+                    <TextBlock Text="{Binding StoragePathHint, StringFormat='stored in {0}'}" Style="{StaticResource Hint}"/>
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

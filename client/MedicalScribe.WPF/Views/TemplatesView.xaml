@@ -1,0 +1,41 @@
+<UserControl x:Class="MedicalScribe.WPF.Views.TemplatesView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Grid Margin="24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <Grid Grid.Row="0">
+            <StackPanel>
+                <TextBlock Text="Report templates" Style="{StaticResource SectionTitle}"/>
+                <TextBlock Text="Templates are data-driven: definitions live server-side, never in XAML." Foreground="{StaticResource MutedInk}" Margin="0,0,0,10"/>
+            </StackPanel>
+            <Button Content="Refresh from server" Style="{StaticResource SecondaryButton}" HorizontalAlignment="Right" VerticalAlignment="Top"
+                    Command="{Binding RefreshCommand}"/>
+        </Grid>
+
+        <Border Grid.Row="1" Style="{StaticResource Card}">
+            <ListBox ItemsSource="{Binding Templates}" SelectedItem="{Binding Selected}" BorderThickness="0" Background="Transparent">
+                <ListBox.ItemTemplate>
+                    <DataTemplate>
+                        <Grid Width="640" HorizontalAlignment="Left">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="220"/>
+                                <ColumnDefinition Width="170"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="{Binding Name}" FontWeight="SemiBold"/>
+                            <TextBlock Grid.Column="1" Text="{Binding Origin}" Foreground="{StaticResource MutedInk}"/>
+                            <TextBlock Grid.Column="2" Text="{Binding Status}" HorizontalAlignment="Right" Foreground="{StaticResource MutedInk}"/>
+                        </Grid>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+        </Border>
+
+        <TextBlock Grid.Row="2" Text="{Binding Note}" Foreground="{StaticResource MutedInk}" Margin="0,10,0,0"/>
+    </Grid>
+</UserControl>

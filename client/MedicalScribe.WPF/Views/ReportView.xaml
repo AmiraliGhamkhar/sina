@@ -1,0 +1,54 @@
+<UserControl x:Class="MedicalScribe.WPF.Views.ReportView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Grid Margin="24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <Grid Grid.Row="0">
+            <StackPanel>
+                <TextBlock Text="Medical report" Style="{StaticResource SectionTitle}"/>
+                <TextBlock Text="{Binding State, StringFormat='lifecycle: {0}'}" Foreground="{StaticResource MutedInk}"/>
+            </StackPanel>
+            <Border HorizontalAlignment="Right" VerticalAlignment="Top" Background="#EFF6FF" CornerRadius="8" Padding="10,4">
+                <TextBlock Text="{Binding State}" FontWeight="SemiBold" Foreground="#1D4ED8" FontSize="12.5"/>
+            </Border>
+        </Grid>
+
+        <Border Grid.Row="1" Background="#FFFBEB" BorderBrush="#FCD34D" BorderThickness="1" CornerRadius="8" Padding="12,8" Margin="0,10">
+            <TextBlock Text="{Binding SafetyBanner}" Foreground="#92400E" FontSize="12.5"/>
+        </Border>
+
+        <Border Grid.Row="2" Style="{StaticResource Card}">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                    <TextBlock Text="Template:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                    <TextBox Text="{Binding TemplateKey}" Width="220" IsReadOnly="True"/>
+                    <Button Content="Generate draft" Margin="16,0,0,0" Command="{Binding GenerateCommand}"/>
+                </StackPanel>
+                <TextBox Grid.Row="1" Text="{Binding DraftText, UpdateSourceTrigger=PropertyChanged}"
+                         AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"
+                         FontSize="14" BorderThickness="0"
+                         VerticalContentAlignment="Top"/>
+            </Grid>
+        </Border>
+
+        <Grid Grid.Row="3" Margin="0,12,0,0">
+            <StackPanel Orientation="Horizontal">
+                <Button Content="Finalize (clinician)" Command="{Binding FinalizeCommand}"/>
+                <Button Content="Approve" Style="{StaticResource DangerButton}" Command="{Binding ApproveCommand}"/>
+                <Button Content="Reopen for editing" Style="{StaticResource SecondaryButton}" Command="{Binding ReopenDraftCommand}"/>
+            </StackPanel>
+            <TextBlock Text="{Binding Message}" HorizontalAlignment="Right" VerticalAlignment="Center"
+                       Foreground="{StaticResource MutedInk}"/>
+        </Grid>
+    </Grid>
+</UserControl>
