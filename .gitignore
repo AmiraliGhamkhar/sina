@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+
+# .NET
+bin/
+obj/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Models
+*.gguf
+*.gguf.*
+*.bin
+*.onnx
+*.safetensors
+*.pt
+*.pth
+
+# Local data
+data/
+logs/
+storage/
+uploads/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Build
+dist/
+build/
+
+# Local reference repositories
+MedicalScribe-References/
