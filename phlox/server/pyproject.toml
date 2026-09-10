@@ -1,0 +1,91 @@
+[project]
+name = "phlox-server"
+version = "2.3.0"
+requires-python = ">=3.12"
+dependencies = [
+    "APScheduler==3.11.3",
+    "fastapi==0.140.0",
+    "httpx==0.28.1",
+    "json-repair==0.61.7",
+    "openai==2.48.0",
+    "platformdirs==4.10.0",
+    "pydantic==2.12.5",
+    "python-multipart==0.0.32",
+    "rapidfuzz==3.14.3",
+    "sqlcipher3==0.6.2",
+    "uvicorn[standard]==0.51.0",
+]
+
+[project.optional-dependencies]
+rag = [
+    "mcp==1.28.1",
+    "numpy==2.5.1",
+    "pypdf==6.14.2",
+    "sqlite-vec==0.1.9",
+    "tiktoken==0.12.0",
+]
+
+ocr = [
+    "phlox-server[rag]",
+    "Pillow==12.3.0",
+    "pytesseract==0.3.13",
+]
+docker = [
+    "phlox-server[rag,ocr]",
+]
+
+[dependency-groups]
+dev = [
+    "nuitka==4.1.3",
+    "pytest==9.1.1",
+    "pytest-asyncio==1.4.0",
+    "pytest-cov==7.0.0",
+    "ruff==0.16.0",
+    "pre-commit==4.6.1",
+    "ty==0.0.63",
+    "pip-audit==2.10.1",
+]
+
+[tool.setuptools]
+py-modules = []
+
+[tool.hatch.build.targets.wheel]
+packages = []
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "B", "C4", "UP", "ARG", "PTH", "SIM", "TCH"]
+ignore = ["E501", "B008", "UP007", "SIM108"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.ty.environment]
+python = ".venv"
+extra-paths = [".."]
+
+[tool.ty.analysis]
+replace-imports-with-any = [
+    "sqlcipher3.**",
+    "tiktoken.**",
+    "pytesseract.**",
+    "pypdf.**",
+    "PIL.**",
+    "sqlite_vec.**",
+    "mcp.**",
+    "numpy.**",
+]
+
+[[tool.ty.overrides]]
+include = ["tests/**"]
+
+[tool.ty.overrides.rules]
+possibly-unresolved-reference = "warn"
+
+[tool.uv]
+required-version = "==0.11.32"
+exclude-newer = "3 days"

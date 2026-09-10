@@ -1,0 +1,184 @@
+services:
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+
+  backend:
+    build:
+      context: ./backend
+      target: dev
+    ports:
+      # loopback-only (S2): Caddy on :80 is the only ingress for the tailnet;
+      # 2727 stays reachable from the host for dev/docs but not from LAN devices.
+      - "127.0.0.1:2727:8000"
+    volumes:
+      - ./backend:/app
+      - workspaces:/workspaces
+    env_file:
+      - .env
+    environment:
+      # /exec shared secret — must match the sandbox service (sweep H3)
+      - SANDBOX_SHARED_SECRET=${SANDBOX_SHARED_SECRET:-}
+    secrets:
+      - openrouter_api_key
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - postgres
+      - redis
+    # For GPU-aware fit scoring (/v1/hardware, /v1/cookbook) give the backend
+    # GPU access (needs nvidia-container-toolkit); without it the endpoints
+    # degrade to cpu_only verdicts:
+    gpus: all
+    # Egress segmentation: the backend is the ONLY compose peer of the sandbox
+    # (it calls sandbox /exec). The backend stays on the default network (for
+    # postgres/redis/worker/searxng + host-gateway) and joins sandboxnet so /exec
+    # still works. The sandbox sits on sandboxnet ALONE and has no route to the
+    # internal services or the host (its host-gateway is dropped below).
+    networks:
+      - default
+      - sandboxnet
+
+  # Code-execution sandbox for file tools (security sweep C1/H1/H3/M1).
+  # Per-user-per-agent git-backed workspaces live on the shared named volume.
+  # Mock in tests/dev when ENABLE_CODE_EXECUTION is false; no host ports.
+  sandbox:
+    build:
+      context: ./sandbox
+    volumes:
+      - workspaces:/workspaces
+    # NO env_file (sweep C1): the sandbox needs no secrets, and inheriting .env
+    # handed a model-controlled root shell SECRET_KEY (forge JWTs + derive the
+    # Fernet provider-key encryption key), DATABASE_URL, POSTGRES_PASSWORD, ...
+    # The ONE deliberate exception (sweep H3): the /exec shared secret. Set
+    # SANDBOX_SHARED_SECRET in .env (any long random string) — compose injects
+    # it into BOTH backend and sandbox; the sandbox app fail-closes without it.
+    environment:
+      - SANDBOX_SHARED_SECRET=${SANDBOX_SHARED_SECRET:-}
+    # Egress segmentation: the sandbox sits on sandboxnet ALONE, so it can reach
+    # ONLY the backend (its sole compose peer) plus outbound internet via NAT. It
+    # has NO route to postgres/redis/backend-internals/worker/searxng — the
+    # internal surface is off-limits to a model-driven shell. NO host-gateway: the
+    # sandbox never calls LM Studio/ComfyUI/host (the backend does), so exposing
+    # the host network here was pure added surface.
+    networks:
+      - sandboxnet
+    # Isolated: no ports to host; backend reaches it at http://sandbox:8001
+    # Container hardening (sweep M1): read-only root fs, no new privs, limits.
+    # F1/C2 confinement: the controller needs a MINIMAL cap allow-list so it can
+    # chown the workspace to a per-tenant UID and drop the bash child to it —
+    # CAP_SETUID/SETGID (Popen user=/group=), CHOWN/FOWNER/DAC_OVERRIDE (chown -R
+    # a root-owned tree), KILL (process-group timeout kill). Everything else stays
+    # dropped. The bash child drops to a nonzero UID and the kernel clears ALL its
+    # capabilities, so the child is fully unprivileged regardless of this list.
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    cap_add:
+      - SETUID
+      - SETGID
+      - CHOWN
+      - FOWNER
+      - DAC_OVERRIDE
+      - KILL
+    security_opt:
+      - no-new-privileges
+    mem_limit: 512m
+    pids_limit: 128
+
+  # deep-research job worker (arq, Redis broker)
+  worker:
+    build:
+      context: ./backend
+      target: dev
+    command: arq app.worker.WorkerSettings
+    volumes:
+      - ./backend:/app
+    env_file:
+      - .env
+    environment:
+      # /exec shared secret — must match the sandbox service (sweep H3)
+      - SANDBOX_SHARED_SECRET=${SANDBOX_SHARED_SECRET:-}
+    secrets:
+      - openrouter_api_key
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - postgres
+      - redis
+
+  # optional self-hosted search for web_search + deep research:
+  # start with `docker compose --profile search up` and set
+  # SEARXNG_URL=http://searxng:8080 in .env (otherwise DuckDuckGo is used)
+  searxng:
+    image: searxng/searxng
+    profiles: ["search"]
+    volumes:
+      - ./searxng:/etc/searxng
+    environment:
+      - SEARXNG_BASE_URL=http://searxng:8080/
+
+  prometheus:
+    image: prom/prometheus
+    ports:
+      # loopback-only (S-B): the tailnet reaches Grafana/Prometheus through
+      # Caddy on :80 if ever needed; 9090 stays available on the host only.
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      # bearer token for the gated /metrics endpoint (written by setup scripts)
+      - ./monitoring/metrics_token:/etc/prometheus/metrics_token:ro
+
+  grafana:
+    image: grafana/grafana
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD in .env}
+    volumes:
+      - grafana-data:/var/lib/grafana
+
+  caddy:
+    image: caddy:2
+    ports:
+      - "80:80"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile
+      - ./frontend/dist:/srv          # built SPA served by Caddy (run `npm run build` first)
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - backend
+
+
+# Egress segmentation (sandbox egress gap): the sandbox is isolated onto its own
+# user-defined network with the backend as its ONLY peer, so a model-driven shell
+# has no route to postgres/redis/backend/worker/searxng or the host. A user-defined
+# network still gets outbound NAT, so pip/npm/git builds keep working. The backend
+# joins both networks (default for internal services + host-gateway, sandboxnet for
+# /exec). All other services stay on the default network untouched.
+networks:
+  sandboxnet:
+    driver: bridge
+
+
+volumes:
+  pgdata:
+  grafana-data:
+  workspaces:
+
+
+secrets:
+  openrouter_api_key:
+    file: ./secrets/openrouter_api_key.txt

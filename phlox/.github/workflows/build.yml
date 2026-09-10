@@ -1,0 +1,265 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    permissions:
+      contents: write
+    strategy:
+      matrix:
+        include:
+          - platform: "macos-latest"
+            arch: "aarch64"
+            os: "darwin"
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: false
+
+      # parakeet.cpp (patched for the Omi Med STT adapter) - pinned commit e8acc617
+      - name: Checkout parakeet.cpp and apply Omi adapter patch
+        run: |
+          git clone https://github.com/mudler/parakeet.cpp.git src-tauri/parakeet.cpp
+          cd src-tauri/parakeet.cpp && git checkout e8acc6172a94e20a952cf1843decace5d771a94b
+          EXPECTED="e8acc6172a94e20a952cf1843decace5d771a94b"
+          ACTUAL=$(git rev-parse HEAD)
+          if [ "$ACTUAL" != "$EXPECTED" ]; then
+            echo "❌ SHA mismatch: expected $EXPECTED, got $ACTUAL"
+            exit 1
+          fi
+          git submodule update --init --recursive
+          git apply --recount ../parakeet-cpp-omi-adapter.patch
+          rm -rf src-tauri/parakeet.cpp/.git
+
+      # llama.cpp b9437
+      - name: Checkout llama.cpp
+        run: |
+          git clone https://github.com/ggml-org/llama.cpp.git src-tauri/llama.cpp
+          cd src-tauri/llama.cpp && git checkout aa46bda89b9a8378ae76bb15fc2ce2f571f0983c
+          EXPECTED="aa46bda89b9a8378ae76bb15fc2ce2f571f0983c"
+          ACTUAL=$(git rev-parse HEAD)
+          if [ "$ACTUAL" != "$EXPECTED" ]; then
+            echo "❌ SHA mismatch: expected $EXPECTED, got $ACTUAL"
+            exit 1
+          fi
+          rm -rf src-tauri/llama.cpp/.git
+
+      - name: Import signing certificate
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: |
+          if [ -z "$APPLE_CERTIFICATE" ]; then
+            echo "❌ APPLE_CERTIFICATE secret is not set"
+            exit 1
+          fi
+          if [ -z "$APPLE_CERTIFICATE_PASSWORD" ]; then
+            echo "❌ APPLE_CERTIFICATE_PASSWORD secret is not set"
+            exit 1
+          fi
+          if [ -z "$APPLE_SIGNING_IDENTITY" ]; then
+            echo "❌ APPLE_SIGNING_IDENTITY secret is not set"
+            exit 1
+          fi
+
+          # Generate and mask keychain password
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+          echo "::add-mask::$KEYCHAIN_PASSWORD"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security set-keychain-settings -lut 3600 build.keychain
+
+          echo "$APPLE_CERTIFICATE" | base64 --decode > certificate.p12
+
+          security import certificate.p12 -k build.keychain -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          rm -f certificate.p12
+
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" build.keychain
+
+          # Verify the identity is actually present before we waste time compiling
+          if ! security find-identity -v -p codesigning build.keychain | grep -q "$APPLE_SIGNING_IDENTITY"; then
+            echo "❌ Signing identity '$APPLE_SIGNING_IDENTITY' not found in keychain after import"
+            security find-identity -v -p codesigning build.keychain
+            exit 1
+          fi
+
+          echo "✅ Certificate imported and signing identity verified"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7
+        with:
+          targets: aarch64-apple-darwin
+
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24.18.0"
+          cache: "npm"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version-file: "server/pyproject.toml"
+
+      - name: Install ccache and Homebrew Python
+        run: brew install ccache python@3.12
+
+      - name: Cache Nuitka and ccache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/Library/Caches/Nuitka
+            ~/.cache/ccache
+          key: nuitka-ccache-${{ runner.os }}-${{ hashFiles('server/**/*.py', 'server/uv.lock') }}
+          restore-keys: |
+            nuitka-ccache-${{ runner.os }}-
+
+      - name: Set up Python venv with uv
+        run: |
+          cd server
+          uv sync --locked --extra rag --python /opt/homebrew/bin/python3.12
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build all components
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: ./build-all.sh
+
+      - name: Build and notarize Tauri app
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          npm run tauri -- build --target aarch64-apple-darwin -- --locked
+
+      - name: Upload DMG
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: Phlox-${{ matrix.os }}-${{ matrix.arch }}
+          path: src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
+
+      - name: Attach to Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
+        with:
+          files: src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-flatpak:
+    permissions:
+      contents: write
+    runs-on: ubuntu-22.04
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-48@sha256:50fea670968fd3ec4aeeb3a91d9d807d0af6eab3c3b44c33d4c40c311832c8fa
+      options: --privileged
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: false
+
+      - name: Build Flatpak
+        uses: flatpak/flatpak-github-actions/flatpak-builder@401fe28a8384095fc1531b9d320b292f0ee45adb # v6.7
+        with:
+          bundle: Phlox-linux-x86_64.flatpak
+          manifest-path: packaging/com.phlox.app.yaml
+          cache-key: flatpak-builder-${{ github.sha }}
+          arch: x86_64
+          verbose: true
+
+      - name: Upload Flatpak bundle
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: Phlox-linux-x86_64.flatpak
+          path: Phlox-linux-x86_64.flatpak
+
+      - name: Attach to Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
+        with:
+          files: Phlox-linux-x86_64.flatpak
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  docker:
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GHCR_PAT }}
+
+      - name: Extract version from tag
+        id: meta
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          if [[ ! "$VERSION" =~ ^[0-9] ]]; then
+            VERSION="2.0.0"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Build and push
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}:${{ steps.meta.outputs.version }}
+            ghcr.io/${{ github.repository }}:latest
+          platforms: linux/amd64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  notify-website:
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [build, build-flatpak, docker]
+    steps:
+      - name: Trigger phlox-website rebuild
+        env:
+          GH_TOKEN: ${{ secrets.WEBSITE_DISPATCH_TOKEN }}
+        run: |
+          curl -sS -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/bloodworks-io/phlox-website/dispatches \
+            -d '{"event_type":"phlox-released","client_payload":{"version":"'"${GITHUB_REF_NAME}"'"}}'

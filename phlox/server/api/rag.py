@@ -1,0 +1,376 @@
+import base64
+import logging
+
+from fastapi import (
+    APIRouter,
+    File,
+    HTTPException,
+    Response,
+    UploadFile,
+)
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
+
+from server.rag.progress import stream_re_embed_progress
+from server.rag.vector_store import VECTOR_STORE_AVAILABLE, get_vector_store_manager
+from server.schemas.rag import (
+    BulkCommitRequest,
+    CommitRequest,
+    DeleteFileRequest,
+    ModifyCollectionRequest,
+    UpdateDocumentMetadataRequest,
+)
+
+router = APIRouter()
+
+logger = logging.getLogger(__name__)
+
+
+class ExtractTextPayload(BaseModel):
+    extracted_text: str
+    filename: str
+
+
+async def _extract_rag_metadata_from_text(
+    vector_store_manager, extracted_text: str, filename: str
+) -> dict:
+    """Shared helper to derive RAG metadata from extracted text and stage it for commit."""
+    if not extracted_text or not extracted_text.strip():
+        raise HTTPException(
+            status_code=400,
+            detail=f"Could not extract text from PDF '{filename}'. Check if it's searchable.",
+        )
+
+    logger.debug(f"Text extracted. Length: {len(extracted_text)}. Storing temporarily.")
+    vector_store_manager.set_extracted_text(extracted_text)
+
+    logger.info("Classifying document (disease / focus / source / title)...")
+    classification = await vector_store_manager.get_document_classification(extracted_text)
+    disease_name = classification.disease_name
+    focus_area = classification.focus_area
+    document_source = classification.document_source
+    title = classification.title
+    logger.info(
+        "Classification complete for '%s': disease='%s' focus='%s' source='%s' title='%s'",
+        filename,
+        disease_name,
+        focus_area,
+        document_source,
+        title,
+    )
+
+    return {
+        "disease_name": disease_name,
+        "focus_area": focus_area,
+        "document_source": document_source,
+        "title": title,
+        "filename": filename,
+        "message": "PDF information extracted. Ready for commit.",
+    }
+
+
+# Helper function to check if RAG is available
+def _check_rag_available():
+    if not VECTOR_STORE_AVAILABLE or get_vector_store_manager() is None:
+        raise HTTPException(
+            status_code=503,
+            detail="RAG features are not available.",
+        )
+
+
+@router.get("/files")
+def get_files():
+    """API endpoint to retrieve the list of document collections."""
+    _check_rag_available()
+    try:
+        vector_store_manager = get_vector_store_manager()
+        collections = vector_store_manager.list_collections()
+        return {"files": collections}
+    except Exception as e:
+        logger.error(f"Error fetching collections: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Error fetching collections") from e
+
+
+@router.get("/collection_files/{collection_name}")
+def get_collection_files(collection_name: str):
+    """API endpoint to retrieve files for a specific collection."""
+    _check_rag_available()
+    try:
+        vector_store_manager = get_vector_store_manager()
+        files = vector_store_manager.get_files_for_collection_with_pdf_flag(collection_name)
+        return {"files": files}
+    except Exception as e:
+        logger.error(f"Error fetching files for collection '{collection_name}': {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error fetching files for collection '{collection_name}'",
+        ) from e
+
+
+@router.post("/modify")
+def modify_collection(request: ModifyCollectionRequest):
+    """API endpoint to modify the name of a collection."""
+    _check_rag_available()
+    try:
+        vector_store_manager = get_vector_store_manager()
+        success = vector_store_manager.modify_collection_name(request.old_name, request.new_name)
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to rename collection")
+        return {"message": "Collection renamed successfully"}
+    except Exception as e:
+        logger.error(f"Error renaming collection: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Error renaming collection") from e
+
+
+@router.delete("/delete-collection/{name}")
+def delete_collection_endpoint(name: str):
+    """API endpoint to delete a collection."""
+    _check_rag_available()
+    try:
+        vector_store_manager = get_vector_store_manager()
+        success = vector_store_manager.delete_collection(name)
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to delete collection")
+        return {"message": "Collection deleted successfully"}
+    except Exception as e:
+        logger.error(f"Error deleting collection: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Error deleting collection") from e
+
+
+@router.delete("/delete-file")
+def delete_file_endpoint(request: DeleteFileRequest):
+    """API endpoint to delete a file from a collection."""
+    _check_rag_available()
+    try:
+        vector_store_manager = get_vector_store_manager()
+        success = vector_store_manager.delete_file_from_collection(
+            request.collection_name, request.file_name
+        )
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to delete file from collection")
+        return {"message": "File deleted from collection successfully"}
+    except Exception as e:
+        logger.error(f"Error deleting file from collection: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Error deleting file from collection",
+        ) from e
+
+
+@router.patch("/update-document-metadata")
+def update_document_metadata(request: UpdateDocumentMetadataRequest):
+    """Update a document's title / source / focus_area (partial)."""
+    _check_rag_available()
+    try:
+        vector_store_manager = get_vector_store_manager()
+        success = vector_store_manager.update_document_metadata(
+            request.collection_name,
+            request.filename,
+            title=request.title,
+            source=request.source,
+            focus_area=request.focus_area,
+        )
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to update document metadata")
+        return {"message": "Document metadata updated successfully"}
+    except Exception as e:
+        logger.error(f"Error updating document metadata: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Error updating document metadata",
+        ) from e
+
+
+@router.get("/download-pdf/{collection_name}/{filename}")
+def download_pdf(collection_name: str, filename: str):
+    """Download the original PDF stored for a file in a collection."""
+    _check_rag_available()
+    try:
+        vector_store_manager = get_vector_store_manager()
+        pdf_bytes = vector_store_manager.get_stored_pdf(collection_name, filename)
+        if pdf_bytes is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No stored PDF found for '{filename}' in collection '{collection_name}'",
+            )
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error retrieving PDF: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Error retrieving PDF",
+        ) from e
+
+
+@router.post("/extract-pdf-info")
+async def extract_pdf_info(file: UploadFile = File(...)):
+    """API endpoint to extract information from a PDF."""
+    _check_rag_available()
+    vector_store_manager = get_vector_store_manager()
+    logger.info(f"Request received for /extract-pdf-info: filename='{file.filename}'")
+
+    if not file.filename:
+        logger.error("Received /extract-pdf-info request with no filename.")
+        raise HTTPException(status_code=400, detail="No filename provided in upload.")
+
+    try:
+        # Read bytes directly — no temp file.
+        content = await file.read()
+        logger.debug(f"Received upload: {len(content)} bytes")
+
+        # Stage raw PDF bytes for optional storage
+        vector_store_manager.set_extracted_pdf(content)
+
+        # Extract text directly from bytes (no disk write)
+        logger.info(f"Extracting text from upload ({len(content)} bytes)")
+        extracted_text = vector_store_manager.extract_text_from_pdf(content)
+        if not extracted_text:
+            logger.warning(
+                f"No text extracted from PDF '{file.filename}'. It might be empty or image-based."
+            )
+
+        return await _extract_rag_metadata_from_text(
+            vector_store_manager=vector_store_manager,
+            extracted_text=extracted_text,
+            filename=file.filename,
+        )
+    except HTTPException as http_exc:
+        # Re-raise HTTPExceptions specifically
+        raise http_exc
+    except Exception as e:
+        logger.error(f"Error processing PDF '{file.filename}': {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Error processing PDF") from e
+
+
+@router.post("/extract-pdf-info-from-text")
+async def extract_pdf_info_from_text(payload: ExtractTextPayload):
+    """API endpoint to extract metadata from already-extracted PDF text (frontend text-first flow)."""
+    _check_rag_available()
+    vector_store_manager = get_vector_store_manager()
+
+    logger.info(
+        "Request received for /extract-pdf-info-from-text: filename='%s', text_length=%d",
+        payload.filename,
+        len(payload.extracted_text or ""),
+    )
+
+    try:
+        return await _extract_rag_metadata_from_text(
+            vector_store_manager=vector_store_manager,
+            extracted_text=payload.extracted_text,
+            filename=payload.filename,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(
+            f"Error processing extracted text for '{payload.filename}': {e}",
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=500, detail="Error processing extracted text"
+        ) from e
+
+
+@router.post("/commit-to-vectordb")
+def commit_to_db(request: CommitRequest):
+    """API endpoint to commit data to the database."""
+    _check_rag_available()
+    try:
+        vector_store_manager = get_vector_store_manager()
+        vector_store_manager.commit_to_vectordb(
+            request.disease_name,
+            request.focus_area,
+            request.document_source,
+            request.filename,
+            title=request.title,
+        )
+
+        return {"message": "Data committed to the database successfully"}
+    except Exception as e:
+        logger.error(f"Error committing data to database: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Error committing data to database",
+        ) from e
+
+
+@router.post("/commit-direct")
+def commit_direct(request: BulkCommitRequest):
+    """API endpoint to commit a document with pre-extracted text in a single call.
+
+    Used by the bulk upload path.
+    """
+    _check_rag_available()
+    try:
+        pdf_bytes = None
+        if request.pdf_base64:
+            pdf_bytes = base64.b64decode(request.pdf_base64)
+
+        vector_store_manager = get_vector_store_manager()
+        vector_store_manager.commit_text_to_vectordb(
+            extracted_text=request.extracted_text,
+            disease_name=request.disease_name,
+            focus_area=request.focus_area,
+            document_source=request.document_source,
+            filename=request.filename,
+            title=request.title,
+            pdf_bytes=pdf_bytes,
+        )
+        return {
+            "message": "Data committed to the database successfully",
+            "filename": request.filename,
+        }
+    except Exception as e:
+        logger.error(f"Error committing data to database: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Error committing data to database",
+        ) from e
+
+
+@router.post("/re-embed")
+def re_embed():
+    """API endpoint to re-embed all collections with the current embedding model."""
+    _check_rag_available()
+    try:
+        vector_store_manager = get_vector_store_manager()
+        result = vector_store_manager.re_embed_all()
+        return {"message": "Re-embedding completed successfully", **result}
+    except Exception as e:
+        logger.error(f"Error during re-embedding: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Error during re-embedding",
+        ) from e
+
+
+@router.post("/re-embed/stream")
+async def re_embed_stream():
+    """Stream re-embedding progress via Server-Sent Events."""
+    _check_rag_available()
+    return StreamingResponse(
+        stream_re_embed_progress(),
+        media_type="text/event-stream",
+    )
+
+
+@router.post("/clear-database")
+def clear_database():
+    """API endpoint to clear the entire RAG database."""
+    _check_rag_available()
+    try:
+        vector_store_manager = get_vector_store_manager()
+        success = vector_store_manager.reset_database()
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to reset RAG database")
+        return {"message": "RAG database cleared successfully"}
+    except Exception as e:
+        logger.error(f"Error clearing RAG database: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Error clearing RAG database") from e

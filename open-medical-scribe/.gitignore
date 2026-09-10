@@ -1,0 +1,14 @@
+node_modules/
+.env
+.DS_Store
+dist/
+coverage/
+data/
+build/
+native/OpenMedicalScribeApple/.build-*/
+native/OpenMedicalScribeApple/.derived-*/
+native/OpenMedicalScribeApple/.spm-*/
+native/OpenMedicalScribeApple/Support/AppIconTemp/
+native/OpenMedicalScribeApple/OpenMedicalScribeApple.xcodeproj/project.xcworkspace/xcuserdata/
+native/OpenMedicalScribeMac/.build/
+*.swp

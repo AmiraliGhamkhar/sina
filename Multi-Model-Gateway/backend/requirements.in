@@ -1,0 +1,54 @@
+# Direct dependencies for the llm-gateway backend (editable source of truth).
+#
+# Workflow (M1): edit this file, then regenerate the lockfile and commit BOTH:
+#   pip-compile --output-file requirements.txt requirements.in
+# (run inside the backend container: `docker compose exec -T backend pip-compile ...`).
+# requirements.txt is generated — never edit it by hand.
+#
+# Cross-platform note: uvicorn[standard] pulls uvloop (Unix-only). The lockfile
+# must carry the `; sys_platform != "win32"` marker on the uvloop pin or Windows
+# venv installs die building it. If your pip-compile regenerates the pin without
+# the marker, re-add it in the same commit (see README "Running without Docker").
+
+# Web framework + ASGI
+fastapi
+uvicorn[standard]
+sse-starlette
+python-multipart
+prometheus-fastapi-instrumentator
+prometheus-client
+
+# Config / validation
+pydantic-settings
+python-dotenv
+PyYAML
+
+# LLM providers (LM Studio + OpenRouter both speak the OpenAI wire protocol)
+openai
+httpx
+
+# Data layer
+sqlalchemy[asyncio]
+asyncpg
+alembic
+pgvector
+psycopg2-binary
+
+# Auth / crypto
+python-jose[cryptography]
+cryptography
+passlib[bcrypt]
+# pinned: passlib 1.7.4 breaks with bcrypt >= 4.1 (missing __about__); keep 4.0.x
+bcrypt==4.0.1
+
+# Background jobs / agent loop
+arq
+redis[asyncio]
+mcp
+
+# Hardware probe / VRAM fit-score
+nvidia-ml-py
+gguf                  # GGUF header reader for HF quant fit estimates (ggml-org/gguf)
+
+# Observability
+langfuse

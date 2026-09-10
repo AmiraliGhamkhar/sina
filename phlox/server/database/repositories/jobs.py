@@ -1,0 +1,224 @@
+import json
+import logging
+import traceback
+from typing import Any
+
+from server.database.core.connection import get_db
+
+
+def generate_jobs_list_from_plan(plan):
+    """Generates a jobs list from a plan string."""
+    logging.info("Generating jobs list from the plan")
+    try:
+        if not plan:
+            return "[]"
+
+        jobs = [
+            item.strip() for item in plan.split("\n") if item.strip() and item.strip()[0].isdigit()
+        ]
+        jobs_list = [
+            {"id": index + 1, "job": job, "completed": False} for index, job in enumerate(jobs)
+        ]
+        return json.dumps(jobs_list)
+    except Exception as e:
+        logging.error(f"Error generating jobs list: {e}")
+        return "[]"
+
+
+def are_all_jobs_completed(jobs_list):
+    """Checks if all jobs in a jobs list are completed."""
+    logging.info("Checking if all jobs are completed")
+    try:
+        if isinstance(jobs_list, str):
+            jobs_list = json.loads(jobs_list)
+
+        if not jobs_list:
+            logging.info("No jobs list provided")
+            return False
+
+        return all(item.get("completed", False) for item in jobs_list)
+    except (json.JSONDecodeError, AttributeError) as e:
+        logging.error(f"Error checking jobs completion: {e}")
+        return False
+
+
+def get_patients_with_outstanding_jobs():
+    """Retrieve patients with outstanding (incomplete) jobs.
+
+    Returns:
+        List[Dict]: List of patient records with outstanding jobs.
+    """
+    try:
+        with get_db().read() as cursor:
+            cursor.execute("""
+                SELECT e.id, e.ur_number, e.encounter_date,
+                       e.encounter_summary, e.jobs_list, e.reasoning_output,
+                       p.first_name, p.last_name, p.dob
+                FROM encounters e
+                LEFT JOIN patient_profiles p ON p.ur_number = e.ur_number
+                WHERE e.all_jobs_completed = 0
+                """)
+
+            patients = []
+            for row in cursor.fetchall():
+                patient = dict(row)
+
+                first = patient.get("first_name")
+                last = patient.get("last_name")
+                patient["name"] = f"{last}, {first}" if (last and first) else (last or first or "")
+
+                # Parse jobs list if it exists
+                if patient.get("jobs_list"):
+                    try:
+                        patient["jobs_list"] = json.loads(patient["jobs_list"])
+                    except json.JSONDecodeError:
+                        patient["jobs_list"] = []
+
+                # Process reasoning output
+                if patient.get("reasoning_output"):
+                    try:
+                        patient["reasoning_output"] = json.loads(patient["reasoning_output"])
+                    except json.JSONDecodeError:
+                        patient["reasoning_output"] = None
+                patients.append(patient)
+
+            return patients
+    except Exception as e:
+        logging.error(f"Error fetching patients with outstanding jobs: {e}")
+        raise
+
+
+def _select_jobs_list_with_cursor(cursor, note_id: int) -> dict[str, Any] | None:
+    """Select an encounter row (with demographics) on an existing cursor."""
+    cursor.execute(
+        """
+        SELECT e.id, e.ur_number, e.encounter_date, e.jobs_list,
+               p.first_name, p.last_name
+        FROM encounters e
+        LEFT JOIN patient_profiles p ON p.ur_number = e.ur_number
+        WHERE e.id = ?
+        """,
+        (note_id,),
+    )
+    row = cursor.fetchone()
+    return dict(row) if row else None
+
+
+def get_latest_encounter_with_jobs(
+    ur_number: str | None = None, patient_name: str | None = None
+) -> dict[str, Any] | None:
+    """Fetch the latest encounter row (jobs_list + demographics) for a patient.
+
+    Looked up by ``ur_number`` (exact) or ``patient_name`` (case-insensitive
+    substring on "Last, First"). Returns None if neither is provided or no
+    match exists.
+    """
+    try:
+        with get_db().read() as cursor:
+            if ur_number:
+                cursor.execute(
+                    """
+                    SELECT e.id, e.ur_number, e.encounter_date, e.jobs_list,
+                           p.first_name, p.last_name, p.dob
+                    FROM encounters e
+                    LEFT JOIN patient_profiles p ON p.ur_number = e.ur_number
+                    WHERE e.ur_number = ?
+                    ORDER BY e.encounter_date DESC
+                    LIMIT 1
+                    """,
+                    (ur_number,),
+                )
+            elif patient_name:
+                cursor.execute(
+                    """
+                    SELECT e.id, e.ur_number, e.encounter_date, e.jobs_list,
+                           p.first_name, p.last_name, p.dob
+                    FROM encounters e
+                    LEFT JOIN patient_profiles p ON p.ur_number = e.ur_number
+                    WHERE LOWER(COALESCE(p.last_name || ', ' || p.first_name, '')) LIKE LOWER(?)
+                    ORDER BY e.encounter_date DESC
+                    LIMIT 1
+                    """,
+                    (f"%{patient_name}%",),
+                )
+            else:
+                return None
+            row = cursor.fetchone()
+            return dict(row) if row else None
+    except Exception as e:
+        logging.error(f"Error fetching latest encounter with jobs: {e}")
+        raise
+
+
+def _serialize_jobs_list(jobs_list: list) -> tuple[str, bool]:
+    """Normalise a jobs list to a JSON string and report completion state."""
+    serializable_jobs = []
+    for job in jobs_list:
+        if hasattr(job, "dict"):
+            serializable_jobs.append(job.dict())
+        elif hasattr(job, "__dict__"):
+            serializable_jobs.append(job.__dict__)
+        else:
+            serializable_jobs.append(job)
+
+    serialized_jobs_list = json.dumps(serializable_jobs)
+    all_jobs_completed = all(job.get("completed", False) for job in serializable_jobs)
+    return serialized_jobs_list, all_jobs_completed
+
+
+def _update_jobs_list_with_cursor(cursor, note_id: int, jobs_list: list) -> None:
+    """Update a patient's jobs list on an existing cursor (for nested transactions)."""
+    # Need to fix this; sloppy
+    serialized_jobs_list, all_jobs_completed = _serialize_jobs_list(jobs_list)
+    cursor.execute(
+        "UPDATE encounters SET jobs_list = ?, all_jobs_completed = ? WHERE id = ?",
+        (serialized_jobs_list, all_jobs_completed, note_id),
+    )
+
+
+def update_patient_jobs_list(note_id: int, jobs_list: list):
+    """Updates a patient's jobs list in the database."""
+    try:
+        with get_db().transaction() as cursor:
+            _update_jobs_list_with_cursor(cursor, note_id, jobs_list)
+        logging.info(f"Updated jobs list for patient {note_id}")
+    except Exception as e:
+        logging.error(f"Error updating jobs list: {e}")
+        raise
+
+
+def count_incomplete_jobs():
+    """Counts the number of incomplete jobs across all patients."""
+    logging.info("Counting incomplete jobs across all patients")
+    try:
+        with get_db().read() as cursor:
+            cursor.execute("SELECT jobs_list FROM encounters WHERE all_jobs_completed = 0")
+            rows = cursor.fetchall()
+
+            incomplete_jobs_count = 0
+
+            for row in rows:
+                if not row["jobs_list"]:
+                    continue
+
+                try:
+                    jobs = json.loads(row["jobs_list"])
+
+                    # Count incomplete jobs
+                    incomplete_jobs_count += sum(
+                        1
+                        for job in jobs
+                        if isinstance(job, dict) and not job.get("completed", False)
+                    )
+
+                except json.JSONDecodeError:
+                    logging.warning(f"Could not parse jobs list: {row['jobs_list']}")
+                    continue
+
+            logging.info(f"Total incomplete jobs: {incomplete_jobs_count}")
+            return incomplete_jobs_count
+
+    except Exception as e:
+        logging.error(f"Database error when counting incomplete jobs: {e}")
+        logging.error(f"Traceback: {traceback.format_exc()}")
+        raise

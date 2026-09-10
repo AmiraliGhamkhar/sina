@@ -1,0 +1,73 @@
+# Stage 1: Node.js stage
+FROM node:24-slim as node-stage
+
+# Set the working directory
+WORKDIR /usr/src/app
+
+# Copy package.json and package-lock.json
+COPY package*.json ./
+
+# Install Node.js dependencies
+RUN npm install
+
+# Copy the rest of the application
+COPY . .
+
+# Stage 2: Development runtime
+FROM python:3.12-slim
+
+# Install uv
+COPY --from=ghcr.io/astral-sh/uv:0.11.32@sha256:df4cae8f3a96d175e2e5f992e597550000edbe78fdc2594d5cd8de1a217f504c /uv /usr/local/bin/uv
+
+# Set the working directory
+WORKDIR /usr/src/app
+
+# Set environment variable
+ENV DOCKER_CONTAINER=true
+# Use the uv-locked project venv
+ENV PATH=/usr/src/app/server/.venv/bin:$PATH
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    tesseract-ocr \
+    libsqlcipher-dev \
+    parallel \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy Node.js and npm from the node-stage
+COPY --from=node-stage /usr/local/bin/node /usr/local/bin/node
+COPY --from=node-stage /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm && \
+    ln -s /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
+
+# Copy application files and node_modules from node-stage
+COPY --from=node-stage /usr/src/app/node_modules ./node_modules
+COPY --from=node-stage /usr/src/app .
+
+# Create directories (dev runs as root for simplicity)
+RUN mkdir -p /usr/src/app/data \
+    /usr/src/app/static \
+    /usr/src/app/temp \
+    /usr/src/app/build
+
+# Install Python dependencies from the locked project venv
+RUN uv sync --directory server --locked --extra docker
+
+# Make a shell script to initialize the database and start both React and FastAPI
+RUN printf '%s\n' \
+'#!/usr/bin/env bash' \
+'set -euo pipefail' \
+'set -x' \
+'' \
+'python /usr/src/app/server/demo/demo_db.py' \
+'# Set default value if SERVER_HOST is not set, then export it for subshells' \
+'export SERVER_HOST=${SERVER_HOST:-0.0.0.0}' \
+'parallel --tag --line-buffer ::: "npm run start-react" "uvicorn server.server:app --reload --host $SERVER_HOST --port 5000"' \
+> /usr/local/bin/start-phlox-dev.sh && \
+chmod +x /usr/local/bin/start-phlox-dev.sh
+
+# Expose necessary ports
+EXPOSE 3000
+
+# Use the script as the CMD
+CMD ["/usr/local/bin/start-phlox-dev.sh"]

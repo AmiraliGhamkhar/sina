@@ -1,0 +1,36 @@
+{
+	# Tailscale terminates TLS (via `tailscale serve`), so Caddy stays on plain :80.
+	auto_https off
+}
+
+:80 {
+	# Site-level security headers — applied to every handler below.
+	# CSP notes: img-src must include blob: (the SPA renders authed images as
+	# blob URLs via AuthedImage), and connect-src must cover the API origins
+	# the SPA talks to (backend :2727 and the Vite dev server :5173).
+	header {
+		X-Frame-Options "DENY"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		Content-Security-Policy "default-src 'self'; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline'; connect-src 'self' http://localhost:2727 http://localhost:5173; script-src 'self'"
+	}
+
+	# API to FastAPI backend (strip the /api prefix the SPA uses).
+	handle /api/* {
+		uri strip_prefix /api
+		reverse_proxy backend:8000 {
+			# Flush each write immediately so SSE token streaming isn't buffered.
+			flush_interval -1
+		}
+	}
+
+	# Everything else to the built SPA. try_files gives client-side-routing
+	# fallback so deep links resolve to index.html. (Image files are NOT
+	# proxied here anymore — S3: the SPA fetches them from the authed
+	# /api/v1/images/file endpoint.)
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+}

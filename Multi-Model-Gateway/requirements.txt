@@ -1,0 +1,8 @@
+# Root shim so a fresh clone works with the canonical:
+#   python -m venv .venv
+#   pip install -r requirements.txt
+# The real dependency set lives in backend/:
+#   backend/requirements.in   -- editable direct deps (source of truth)
+#   backend/requirements.txt  -- pip-compile lockfile (generated; do not edit)
+# See README "Running the Backend Without Docker (venv)" for the full setup.
+-r backend/requirements.txt

@@ -1,0 +1,94 @@
+"""Database backup functionality for Phlox.
+
+Provides automatic backup of the SQLite database before migrations run,
+with rotation to prevent disk space issues.
+"""
+
+import logging
+import shutil
+from datetime import datetime
+from pathlib import Path
+
+from server._version import __version__
+
+# Configuration
+MAX_BACKUPS = 3  # Keep last 3 backups
+BACKUP_SUBDIR = "backups"  # Subdirectory name within data directory
+
+
+def create_backup(db_path: str, db_dir: Path) -> str | None:
+    """
+    Create a backup of the database file before migrations.
+
+    Args:
+        db_path: Full path to the database file
+        db_dir: Parent directory of the database (Path object)
+
+    Returns:
+        Path to backup file if successful, None if failed or no DB exists
+    """
+    # Skip if database doesn't exist yet (first run)
+    if not Path(db_path).exists():
+        logging.info("No existing database to backup (first run)")
+        return None
+
+    try:
+        # Create backup directory
+        backup_dir = db_dir / BACKUP_SUBDIR
+        backup_dir.mkdir(parents=True, exist_ok=True)
+
+        # Generate backup filename with version and timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        db_name = Path(db_path).name
+        version = __version__
+        backup_name = f"{db_name}.v{version}.{timestamp}.bak"
+        backup_path = backup_dir / backup_name
+
+        # Copy the database and wal file (it's already encrypted)
+        shutil.copy2(db_path, backup_path)
+        for suffix in ("-wal", "-shm"):
+            sidecar = Path(f"{db_path}{suffix}")
+            if sidecar.exists():
+                shutil.copy2(sidecar, f"{backup_path}{suffix}")
+
+        logging.info(f"Database backup created: {backup_path}")
+
+        # Rotate old backups
+        _rotate_backups(backup_dir, db_name)
+
+        return str(backup_path)
+
+    except Exception as e:
+        # Log warning but don't block startup
+        logging.warning(f"Failed to create database backup: {e}")
+        return None
+
+
+def _rotate_backups(backup_dir: Path, db_name: str) -> None:
+    """
+    Remove old backups, keeping only the most recent MAX_BACKUPS.
+
+    Args:
+        backup_dir: Directory containing backups
+        db_name: Original database filename to match backups
+    """
+    try:
+        # Find all backups for this database, sorted by modification time (newest first)
+        pattern = f"{db_name}.*.bak"
+        backups = sorted(
+            backup_dir.glob(pattern),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+
+        # Remove backups beyond our limit, plus their WAL sidecars.
+        for old_backup in backups[MAX_BACKUPS:]:
+            old_backup.unlink()
+            for suffix in ("-wal", "-shm"):
+                sidecar = Path(f"{old_backup}{suffix}")
+                if sidecar.exists():
+                    sidecar.unlink()
+            logging.info(f"Removed old backup: {old_backup}")
+
+    except Exception as e:
+        logging.warning(f"Failed to rotate backups: {e}")

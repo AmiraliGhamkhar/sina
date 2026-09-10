@@ -1,0 +1,13 @@
+# Minimal SearXNG config for llm-gateway: enables the JSON API that
+# services/search.py consumes. Everything else inherits the defaults.
+use_default_settings: true
+
+server:
+  # internal-only service (no published port); secret just needs to exist
+  secret_key: "change-me-llm-gateway-searxng"
+  limiter: false
+
+search:
+  formats:
+    - html
+    - json

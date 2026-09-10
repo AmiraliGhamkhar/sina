@@ -1,0 +1,19 @@
+version: "3"
+services:
+    app:
+        image: localhost/phlox-dev:latest
+        container_name: phlox-dev
+        network_mode: host
+        environment:
+            DB_ENCRYPTION_KEY: ${DB_ENCRYPTION_KEY}
+            NODE_ENV: development
+            LLM_EXTRA_BODY: '{"extra_body": {"chat_template_kwargs": {"enable_thinking": false}}}'
+            TZ: Australia/Melbourne
+            SERVER_HOST: 0.0.0.0 # Bind to all interfaces
+            RATE_LIMIT_ENABLED: false
+        volumes:
+            - .:/usr/src/app
+            - /usr/src/app/node_modules
+            - /usr/src/app/server/.venv 
+            - ./data:/usr/src/app/data # Optional: Persist test data
+            - ./logs:/usr/src/app/logs # Optional: Persist logs

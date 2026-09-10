@@ -1,0 +1,127 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "30 17 * * *" # 3:30AM AEST (UTC+10)
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24.18.0"
+          cache: "npm"
+
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npx vitest run
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Verify Docker uv versions match pyproject
+        run: |
+          UV_VERSION="$(python -c 'import tomllib; print(tomllib.load(open("server/pyproject.toml", "rb"))["tool"]["uv"]["required-version"].removeprefix("=="))')"
+          for dockerfile in Dockerfile Dockerfile.dev Dockerfile.test; do
+            if ! grep -Fq "ghcr.io/astral-sh/uv:${UV_VERSION}@" "$dockerfile"; then
+              echo "::error file=${dockerfile}::uv image must use version ${UV_VERSION}"
+              exit 1
+            fi
+          done
+
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version-file: "server/pyproject.toml"
+          enable-cache: true
+          cache-dependency-glob: "server/uv.lock"
+
+      - run: cd server && uv sync --locked
+      - run: cd server && uv run ruff check . --output-format=github
+      - run: cd server && uv run ruff format --check .
+      - run: cd server && uv run ty check .
+
+      - uses: suzuki-shunsuke/pinact-action@1081f5ad49ac904b7d977784f338145150a32112 # v1.4.0
+        with:
+          skip_push: "true"
+
+  test:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build Test Docker Image
+        run: docker build -f Dockerfile.test -t phlox-test .
+
+      - name: Run Tests in Docker Container
+        run: |
+          docker run --name test-container phlox-test
+          docker cp test-container:/usr/src/app/coverage.lcov ./coverage.lcov
+          docker rm test-container
+
+      - uses: coverallsapp/github-action@8d6379e14d29928660c4ba802d8e85393440b329 # v2.3.8
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          file: coverage.lcov
+
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24.18.0"
+          cache: "npm"
+
+      - run: npm ci
+      - name: Verify npm honors min-release-age cooldown
+        run: test "$(npm config get min-release-age)" = "3"
+      - name: npm audit
+        id: npm-audit
+        continue-on-error: true
+        run: npm audit --audit-level=high
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version-file: "server/pyproject.toml"
+          enable-cache: true
+          cache-dependency-glob: "server/uv.lock"
+
+      - run: cd server && uv sync --locked --extra docker
+      - name: pip-audit
+        id: pip-audit
+        continue-on-error: true
+        run: cd server && uv run pip-audit --local --strict --skip-editable
+
+      - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7
+      - name: cargo audit
+        id: cargo-audit
+        continue-on-error: true
+        uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2.0.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          working-directory: src-tauri
+
+      - name: Fail if an audit found vulnerabilities
+        if: always() && (steps.npm-audit.outcome == 'failure' || steps.pip-audit.outcome == 'failure' || steps.cargo-audit.outcome == 'failure')
+        run: exit 1

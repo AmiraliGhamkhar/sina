@@ -1,0 +1,314 @@
+// Styles for the chat interface.
+import { colors } from "../colors";
+
+const CHAT_UI_TOKENS = {
+    chevron: {
+        light: "#9ca3af",
+        dark: "#9ca3af",
+    },
+};
+
+const floatingStyles = (props) => ({
+    ".floating-panel": {
+        backgroundColor:
+            props.colorMode === "light"
+                ? `${colors.light.secondary} !important`
+                : `${colors.dark.secondary} !important`,
+        borderRadius: "xl",
+        border:
+            props.colorMode === "light"
+                ? `1px solid ${colors.light.surface} !important`
+                : `1px solid ${colors.dark.surface} !important`,
+        color:
+            props.colorMode === "light"
+                ? `${colors.light.textSecondary} !important`
+                : `${colors.dark.textSecondary} !important`,
+        fontSize: "1rem !important",
+        fontWeight: "700",
+    },
+    ".floating-main": {
+        backgroundColor:
+            props.colorMode === "light" ? colors.light.base : colors.dark.crust,
+        color:
+            props.colorMode === "light"
+                ? `${colors.light.textSecondary} !important`
+                : `${colors.dark.textSecondary} !important`,
+        fontWeight: "normal",
+
+        borderTopLeftRadius: "0 !important",
+        borderTopRightRadius: "md !important",
+        borderBottomLeftRadius: "md !important",
+        borderBottomRightRadius: "md !important",
+        fontSize: "0.7rem !important",
+    },
+    ".chat-suggestions": {
+        backgroundColor:
+            props.colorMode === "light"
+                ? `${colors.light.crust} !important`
+                : `${colors.dark.overlay0} !important`,
+        borderRadius: "xl !important",
+        border:
+            props.colorMode === "light"
+                ? `1px solid ${colors.light.surface} !important`
+                : `1px solid ${colors.dark.surface1} !important`,
+        fontWeight: "500 !important",
+        fontSize: "0.9rem !important",
+        color:
+            props.colorMode === "light"
+                ? `${colors.light.textSecondary} !important`
+                : `${colors.dark.textTertiary} !important`,
+        _hover: {
+            transform: "translateY(-1px)",
+            boxShadow: "sm",
+        },
+    },
+    ".refinement-suggestions": {
+        backgroundColor:
+            props.colorMode === "light"
+                ? `${colors.light.crust} !important`
+                : `${colors.dark.overlay0} !important`,
+        borderRadius: "xl !important",
+        height: "25px !important",
+        fontSize: "0.8rem !important",
+        fontWeight: "500 !important",
+        border:
+            props.colorMode === "light"
+                ? `1px solid ${colors.light.surface} !important`
+                : "none !important",
+        color:
+            props.colorMode === "light"
+                ? `${colors.light.textSecondary} !important`
+                : `${colors.dark.textTertiary} !important`,
+    },
+    ".quick-chat-buttons-collapsed": {
+        backgroundColor:
+            props.colorMode === "light"
+                ? `${colors.light.crust} !important`
+                : `${colors.dark.overlay0} !important`,
+        borderRadius: "lg !important",
+        border:
+            props.colorMode === "light"
+                ? `1px solid ${colors.light.surface} !important`
+                : "none !important",
+        color:
+            props.colorMode === "light"
+                ? `${colors.light.textSecondary} !important`
+                : `${colors.dark.textTertiary} !important`,
+        justifyContent: "flex-start !important",
+        padding: "0 8px !important",
+        height: "32px !important",
+    },
+
+    ".quick-chat-buttons-text": {
+        maxWidth: "calc(100% - 24px) !important",
+        whiteSpace: "nowrap !important",
+        overflow: "hidden !important",
+        textOverflow: "ellipsis !important",
+        textAlign: "left !important",
+        display: "block !important",
+    },
+    ".message-box": {
+        padding: "10px",
+        borderRadius: "2xl",
+        wordBreak: "break-word",
+    },
+    ".message-box.assistant": {
+        backgroundColor: "transparent !important",
+        color:
+            props.colorMode === "light"
+                ? `${colors.light.textSecondary} !important`
+                : `${colors.dark.textSecondary} !important`,
+        borderRadius: "0 !important",
+        border: "none !important",
+        boxShadow: "none !important",
+        padding: "0 !important",
+    },
+    ".message-box.user": {
+        background:
+            props.colorMode === "light"
+                ? `${colors.light.brandFaint} !important`
+                : `${colors.dark.brandFaint} !important`,
+        color: `${colors.light.invertedText} !important`,
+        borderRadius: "2xl !important",
+    },
+    ".message-box ul, .message-box ol": {
+        paddingLeft: "20px",
+    },
+    ".template-selector": {
+        borderTop:
+            props.colorMode === "light"
+                ? `1px solid ${colors.light.surface} !important`
+                : `1px solid ${colors.dark.surface} !important`,
+    },
+    ".template-selector .template-selector": {
+        textAlign: "left !important",
+        display: "block !important",
+    },
+    ".thinking-toggle": {
+        display: "inline-flex",
+        alignItems: "center",
+        padding: "2px 6px",
+        margin: "2px 0",
+        cursor: "pointer",
+        userSelect: "none",
+    },
+    ".thinking-block": {
+        borderLeftColor:
+            props.colorMode === "light"
+                ? `${colors.light.secondaryButton} !important`
+                : `${colors.dark.secondaryButton} !important`,
+    },
+    ".thinking-block-text": {
+        fontSize: "0.9rem !important",
+    },
+    ".collapse-toggle": {
+        border: "none !important",
+        borderRadius: "lg !important",
+        color:
+            props.colorMode === "light"
+                ? `${colors.light.textSecondary} !important`
+                : `${colors.dark.textTertiary} !important`,
+        backgroundColor:
+            props.colorMode === "light"
+                ? `${colors.light.crust} !important`
+                : `${colors.dark.base} !important`,
+    },
+    ".chat-disclosure-icon": {
+        color:
+            props.colorMode === "light"
+                ? `${CHAT_UI_TOKENS.chevron.light} !important`
+                : `${CHAT_UI_TOKENS.chevron.dark} !important`,
+        backgroundColor: "transparent !important",
+        border: "none !important",
+        boxShadow: "none !important",
+        minWidth: "auto !important",
+        height: "auto !important",
+        padding: "0 !important",
+    },
+    ".chat-disclosure-icon:hover, .chat-disclosure-icon:active": {
+        backgroundColor: "transparent !important",
+    },
+    ".fam-main-button": {
+        backgroundColor:
+            props.colorMode === "light"
+                ? `${colors.light.surface} !important` // Choose a prominent color
+                : `${colors.dark.surface} !important`,
+        color:
+            props.colorMode === "light"
+                ? `${colors.light.textTertiary} !important`
+                : `${colors.dark.textTertiary} !important`,
+        transition:
+            "transform 0.2s ease-in-out, background-color 0.2s ease-in-out",
+        _hover: {
+            transform: "scale(1.1)",
+            backgroundColor:
+                props.colorMode === "light"
+                    ? `${colors.light.primaryHover} !important` // Darker/lighter shade
+                    : `${colors.dark.primaryHover} !important`,
+        },
+    },
+    ".fam-action-button": {
+        backgroundColor:
+            props.colorMode === "light"
+                ? `${colors.light.surface} !important`
+                : `${colors.dark.surface} !important`,
+        color:
+            props.colorMode === "light"
+                ? `${colors.light.textTertiary} !important`
+                : `${colors.dark.textTertiary} !important`,
+
+        transition:
+            "transform 0.15s ease-in-out, background-color 0.15s ease-in-out",
+        _hover: {
+            transform: "scale(1.05)",
+            backgroundColor:
+                props.colorMode === "light"
+                    ? `${colors.light.overlay0} !important`
+                    : `${colors.dark.overlay0} !important`,
+        },
+    },
+    ".pill-box-scribe": {
+        background:
+            "linear-gradient(to bottom, rgba(45, 47, 65, 0.95), rgba(30, 32, 48, 0.95)) !important",
+        backdropFilter: "blur(20px) saturate(180%)",
+        color: colors.light.sidebar.text,
+        border: "1px solid rgba(0, 0, 0, 0.2) !important",
+        boxShadow:
+            "0 8px 32px rgba(20, 20, 38, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.2) !important",
+        justifyContent: "center",
+        alignItems: "center",
+    },
+    ".floating-action-menu": {
+        backgroundColor:
+            props.colorMode === "light"
+                ? colors.light.secondary
+                : colors.dark.secondary,
+        color: colors.light.sidebar.text,
+        border:
+            props.colorMode === "light"
+                ? `1px solid ${colors.light.surface} !important`
+                : `1px solid ${colors.dark.surface} !important`,
+    },
+    ".floating-action-menu .chakra-button svg": {
+        width: "14px !important",
+        height: "14px !important",
+    },
+    // Dashboard chat styles
+    ".dashboard-chat-container": {
+        height: "calc(100dvh - 60px)",
+        display: "flex",
+        flexDirection: "column",
+        width: "100%",
+    },
+    ".dashboard-chat-input-container": {
+        background:
+            props.colorMode === "light"
+                ? `${colors.light.secondary} !important`
+                : `${colors.dark.surface} !important`,
+        border:
+            props.colorMode === "light"
+                ? `1px solid ${colors.light.surface} !important`
+                : `1px solid ${colors.dark.surface2} !important`,
+        borderRadius: "3xl !important",
+        padding: "10px 16px !important",
+    },
+    ".dashboard-chat-messages": {
+        height: "calc(100dvh - 160px)",
+        overflowY: "auto",
+        paddingBottom: "100px", // Space for fixed input
+    },
+    ".dashboard-chat-greeting": {
+        color:
+            props.colorMode === "light"
+                ? `${colors.light.textSecondary} !important`
+                : `${colors.dark.textSecondary} !important`,
+    },
+    ".dashboard-chat-suggestions": {
+        backgroundColor:
+            props.colorMode === "light"
+                ? `${colors.light.crust} !important`
+                : `${colors.dark.overlay0} !important`,
+        borderRadius: "xl !important",
+        fontWeight: "500 !important",
+        fontSize: "0.9rem !important",
+        border:
+            props.colorMode === "light"
+                ? `1px solid ${colors.light.surface} !important`
+                : `1px solid ${colors.dark.surface1} !important`,
+        color:
+            props.colorMode === "light"
+                ? `${colors.light.textSecondary} !important`
+                : `${colors.dark.textTertiary} !important`,
+        _hover: {
+            transform: "translateY(-1px)",
+            boxShadow: "sm",
+        },
+    },
+});
+
+const _lo = floatingStyles({ colorMode: "light" });
+const _do = floatingStyles({ colorMode: "dark" });
+export const floatingGlobalCss = {};
+for (const sel of Object.keys(_lo)) {
+    floatingGlobalCss[sel] = { _light: _lo[sel], _dark: _do[sel] };
+}
