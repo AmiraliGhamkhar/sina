@@ -5,7 +5,7 @@ architecture/reference sources.
 
 ## SpeakType
 Path:
-../MedicalScribe-References/speaktype
+../speaktype
 
 Primary reference:
 src/SpeakType.Core/
@@ -31,7 +31,7 @@ WPF audio recording, microphone handling, hotkeys and desktop interaction.
 
 ## Phlox
 Path:
-../MedicalScribe-References/phlox
+../phlox
 
 Primary reference:
 server/api/
@@ -57,7 +57,7 @@ and LLM integration concepts.
 
 ## Open Medical Scribe
 Path:
-../MedicalScribe-References/open-medical-scribe
+../open-medical-scribe
 
 Primary reference:
 src/providers/
@@ -91,7 +91,7 @@ streaming transcription, privacy, audit and medical note orchestration.
 
 ## Multi-Model-Gateway
 Path:
-../MedicalScribe-References/Multi-Model-Gateway
+../Multi-Model-Gateway
 
 Primary reference:
 backend/app/services/
