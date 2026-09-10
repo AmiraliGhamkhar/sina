@@ -1,0 +1,30 @@
+# Visual Studio / .NET Core .gitignore
+[Bb]in/
+[Oo]bj/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Logs
+*.log
+help.txt
+
+# External Tools and Models (Binaries)
+# Usually we don't commit these, but we keep the readmes
+tools/whisper/SDL2.dll
+tools/whisper/*.exe
+tools/whisper/ggml*.dll
+tools/whisper/whisper.dll
+models/*.bin
+
+# VS Code
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Installer Artifacts
+installer/Output/
+installer/staging/

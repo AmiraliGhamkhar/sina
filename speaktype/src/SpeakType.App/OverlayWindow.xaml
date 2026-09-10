@@ -1,0 +1,30 @@
+<Window x:Class="SpeakType.App.OverlayWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="SpeakType Overlay" Height="48" Width="220"
+        WindowStyle="None" AllowsTransparency="True" Background="Transparent"
+        Topmost="True" ShowInTaskbar="False" ResizeMode="NoResize"
+        WindowStartupLocation="Manual">
+    <Border CornerRadius="24" Padding="15,0" Background="#F2121212" BorderThickness="1" BorderBrush="#33FFFFFF">
+        <Border.Effect>
+            <DropShadowEffect Color="Black" BlurRadius="10" ShadowDepth="2" Opacity="0.5"/>
+        </Border.Effect>
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+            
+            <TextBlock x:Name="StatusText" Text="" Grid.Column="0" Grid.ColumnSpan="2"
+                       Foreground="#E0E0E0" FontSize="14" FontWeight="SemiBold" FontFamily="Segoe UI"
+                       HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0"/>
+            
+            <Canvas x:Name="WaveformCanvas" Grid.Column="1" Height="20" 
+                    HorizontalAlignment="Stretch" VerticalAlignment="Center"
+                    Visibility="Collapsed"/>
+        </Grid>
+    </Border>
+</Window>

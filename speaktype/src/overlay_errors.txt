@@ -1,0 +1,2 @@
+   1:7>C:\Users\arvin\code\speaktype\src\SpeakType.App\OverlayWindow.xaml.cs(36,58): error CS0104: 'Color' is an ambiguous reference between 'System.Drawing.Color' and 'System.Windows.Media.Color' [C:\Users\arvin\code\speaktype\src\SpeakType.App\SpeakType.App.csproj]
+   1:7>C:\Users\arvin\code\speaktype\src\SpeakType.App\OverlayWindow.xaml.cs(40,58): error CS0104: 'Color' is an ambiguous reference between 'System.Drawing.Color' and 'System.Windows.Media.Color' [C:\Users\arvin\code\speaktype\src\SpeakType.App\SpeakType.App.csproj]
