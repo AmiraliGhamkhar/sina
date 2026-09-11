@@ -62,6 +62,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ReportViewModel>();
         services.AddSingleton<TemplatesViewModel>();
         services.AddSingleton<AiSettingsViewModel>();
+        services.AddSingleton<ModelsViewModel>();
         services.AddSingleton<UserSettingsViewModel>();
         services.AddSingleton<MainViewModel>();
         return services;

@@ -32,7 +32,7 @@ from api.schemas.templates import (
     TemplateUpdateRequest,
 )
 from api.services.ai_bridge import build_candidates, llm_route_request, provider_config_with_secrets
-from api.services.note_prompt import parse_model_json, redact_phi
+from api.services.note_prompt import parse_model_json
 from api.services.templates import TemplateError, TemplateService
 
 logger = logging.getLogger(__name__)
@@ -176,7 +176,10 @@ async def extract_template(
     descriptor = app.state.ai_registry.get_descriptor(ProviderKind.LLM, decision.provider)
     is_cloud = descriptor.capabilities.privacy is PrivacyClass.CLOUD
     redact = is_cloud and settings.llm.cloud.redact_phi_for_cloud
-    note_text = redact_phi(body.example_note) if redact else body.example_note
+    # regex + NER model redaction (services/pii_ner.py) when available
+    note_text = (
+        await app.state.redaction.redact(body.example_note) if redact else body.example_note
+    )
 
     user_msg = (
         "<<<EXAMPLE_NOTE>>>\n"

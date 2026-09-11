@@ -168,6 +168,7 @@ def build_default_registry() -> ProviderRegistry:
     from ai.stt.deepgram import DeepgramProvider, deepgram_configured
     from ai.stt.mock import MockSttProvider
     from ai.stt.qwen_asr import QwenAsrProvider, qwen_asr_configured
+    from ai.stt.shenava import ShenavaProvider, shenava_configured
     from ai.stt.speechmatics import SpeechmaticsProvider, speechmatics_configured
     from ai.stt.whisper_server import WhisperServerProvider, whisper_local_configured
 
@@ -224,6 +225,27 @@ def build_default_registry() -> ProviderRegistry:
                 "strong Persian. Configure MS_STT__QWEN_ASR__URL."
             ),
             config_keys=("stt.qwen_asr.url",),
+        )
+    )
+    registry.register(
+        ProviderDescriptor(
+            name="shenava",
+            kind=ProviderKind.STT,
+            capabilities=ProviderCapabilities(
+                privacy=PrivacyClass.LOCAL,
+                supports_streaming=True,
+                supports_batch=True,
+                languages=("fa",),
+                latency_hint_ms=600,
+            ),
+            factory=lambda cfg: ShenavaProvider(cfg),
+            configured=shenava_configured,
+            description=(
+                "In-process Persian STT: Shenava Koochik FastConformer CTC via "
+                "sherpa-onnx (pip install \".[local-ai]\"). Auto-configured once "
+                "the 'shenava-koochik' model is downloaded from the Models screen."
+            ),
+            config_keys=("stt.shenava.model_path", "stt.shenava.tokens_path"),
         )
     )
     registry.register(

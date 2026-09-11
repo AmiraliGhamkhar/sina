@@ -149,6 +149,26 @@ public sealed class ApiClient : IApiClient
         PostAsyncOrNullAsync<NormalizationResultDto>(
             "/api/v1/terminology/normalize", new { text }, ct);
 
+    // -- model hub ----------------------------------------------------------------
+
+    public async Task<IReadOnlyList<ModelInfoDto>> GetModelsAsync(CancellationToken ct = default)
+    {
+        var list = await GetAsync<ModelListDto>("/api/v1/models", ct);
+        return list?.Models ?? new List<ModelInfoDto>();
+    }
+
+    public Task<ModelInfoDto?> GetModelAsync(string modelId, CancellationToken ct = default) =>
+        GetAsync<ModelInfoDto>($"/api/v1/models/{modelId}", ct);
+
+    public Task<ModelDownloadAcceptedDto> StartModelDownloadAsync(
+        string modelId, CancellationToken ct = default) =>
+        PostAsync<ModelDownloadAcceptedDto>(
+            $"/api/v1/models/{modelId}/download", new { }, ct);
+
+    public Task<ModelDeletedDto> DeleteModelAsync(
+        string modelId, CancellationToken ct = default) =>
+        DeleteAsync<ModelDeletedDto>($"/api/v1/models/{modelId}", ct);
+
     // -- transport plumbing ----------------------------------------------------
 
     private async Task<T?> GetAsync<T>(string path, CancellationToken ct)
@@ -177,6 +197,14 @@ public sealed class ApiClient : IApiClient
     {
         using var response = await SendAsync(
             HttpMethod.Post, path, JsonContent.Create(body, options: JsonOptions), ct);
+        var result = await ReadJsonAsync<T>(response, ct);
+        return result ?? throw new ApiException(
+            response.StatusCode, "EMPTY_RESPONSE", "server returned no body");
+    }
+
+    private async Task<T> DeleteAsync<T>(string path, CancellationToken ct)
+    {
+        using var response = await SendAsync(HttpMethod.Delete, path, content: null, ct);
         var result = await ReadJsonAsync<T>(response, ct);
         return result ?? throw new ApiException(
             response.StatusCode, "EMPTY_RESPONSE", "server returned no body");

@@ -2,10 +2,16 @@
 
 ## Topology
 
-- **Clinic LAN**: Windows workstations (WPF, MSIX-installed) → clinic servers:
+- **Clinic LAN**: Windows workstations (WPF — self-contained exe from the
+  GitHub Release, or MSIX for auto-update shops) → clinic servers:
   nginx gateway (TLS), FastAPI api (1 worker until Phase 8 load tests; then N
   behind the gateway with sticky WS or Redis-coordinated sessions), Postgres 16,
   Redis 7, llama.cpp server (GPU host) and/or whisper-server.
+- **Local AI models** (optional, `docker compose --profile stt` /
+  `--profile llm`): downloaded + sha256-verified from the client's AI Models
+  screen into `./models` (see `docs/MODELS.md`). In-process models (Shenava
+  STT, PII NER) need the `local-ai` extra — included in the Dockerfile by
+  default; native installs: `pip install ".[local-ai]"`.
 - **Hybrid/cloud opt-in**: only after the org accepts data-exit policy; every
   encounter defaults `privacy_required=true`, which *cannot* be overridden by
   user preference (tested invariant).

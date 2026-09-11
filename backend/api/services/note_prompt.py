@@ -119,6 +119,9 @@ _REDACTIONS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"(?<!\d)\d{3}-?\d{7}(?!\d)"), "[REDACTED:national-id]"),
     # mobile numbers (09xxxxxxxxx, +98 9xxxxxxxxx)
     (re.compile(r"(?<!\d)(?:\+98|0098|0)?9\d{9}(?!\d)"), "[REDACTED:phone]"),
+    # mobile numbers in Persian digits (۰۹… / ۹…) — dictation is Persian-first;
+    # \d alone doesn't help because the literals 0/9 above are ASCII-only
+    (re.compile(r"(?<![0-9۰-۹])[۰]?۹[۰-۹]{9}(?![0-9۰-۹])"), "[REDACTED:phone]"),
     # long digit runs (MRN/account style)
     (re.compile(r"(?<!\d)\d{8,}(?!\d)"), "[REDACTED:id]"),
     (re.compile(r"[\w.+-]+@[\w-]+\.[\w.]+"), "[REDACTED:email]"),

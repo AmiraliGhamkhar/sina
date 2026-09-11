@@ -1,0 +1,75 @@
+# Tag-driven releases (v*): rebuilds the self-contained Windows client from the
+# tagged commit and attaches it to a GitHub Release. The backend ships as a
+# Docker image / docker-compose stack (see DEPLOYMENT.md) — no binary artifact.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to (re)release"
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  DOTNET_NOLOGO: "true"
+  DOTNET_CLI_TELEMETRY_OPTOUT: "true"
+
+jobs:
+  windows-client:
+    name: Windows client · self-contained exe
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Publish (self-contained, single file)
+        shell: pwsh
+        env:
+          TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+        run: >-
+          dotnet publish client/MedicalScribe.WPF/MedicalScribe.WPF.csproj
+          -c Release -r win-x64 --self-contained true
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:EnableCompressionInSingleFile=true
+          -p:Version="$($env:TAG.TrimStart('v'))"
+          -o publish
+
+      - name: Zip + checksum
+        shell: pwsh
+        run: |
+          Compress-Archive -Path publish/MedicalScribe.WPF.exe -DestinationPath MedicalScribe-win-x64.zip
+          (Get-FileHash MedicalScribe-win-x64.zip -Algorithm SHA256).Hash + "  MedicalScribe-win-x64.zip" | Set-Content -NoNewline sha256.txt
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+        shell: pwsh
+        run: |
+          $tag = $env:TAG
+          $notes = @"
+          MedicalScribe $tag
+
+          **MedicalScribe-win-x64.zip** — self-contained Windows client (no .NET
+          install needed; Windows 10+ x64). Unzip and run ``MedicalScribe.WPF.exe``.
+
+          Server setup: see ``DEPLOYMENT.md`` (docker compose) and ``docs/MODELS.md``
+          (local AI models: download + auto-configure from the client's AI Models
+          screen). Verify the zip against ``sha256.txt`` before use.
+          "@
+          gh release create $tag MedicalScribe-win-x64.zip sha256.txt `
+            --title "MedicalScribe $tag" --notes $notes --verify-tag

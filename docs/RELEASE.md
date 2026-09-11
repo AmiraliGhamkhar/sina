@@ -43,10 +43,27 @@ a Windows machine / production credentials.
       failures_total`, `medicalscribe_http_rate_limited_total`, provider
       health panels (docs/DEPLOYMENT.md §Ops).
 
-## 4. Windows client packaging (needs a Windows machine)
+## 4. Windows client packaging
 
-MSIX packaging and signing cannot be produced from Linux CI (makeappx /
-SignTool are Windows tools); this is the manual step of the release.
+**Default path — self-contained exe via CI (no Windows machine needed).** Push a
+`v*` tag; `.github/workflows/release.yml` rebuilds the client from the tagged
+commit, produces `MedicalScribe-win-x64.zip` (single-file, self-contained —
+runs on Windows 10+ x64 with no .NET install) plus `sha256.txt`, and attaches
+both to the GitHub Release. Every push also builds the same artifact as the
+`client-publish` CI job (artifact `MedicalScribe-win-x64`).
+
+1. [ ] CI green on the tagged commit (backend + client-windows + docker).
+2. [ ] `git tag vX.Y.Z && git push origin vX.Y.Z` — release workflow runs.
+3. [ ] Verify the Release page lists `MedicalScribe-win-x64.zip` +
+      `sha256.txt`; copy the checksum to the clinic install medium.
+4. [ ] Smoke on one workstation: unzip, run `MedicalScribe.WPF.exe`,
+      first-run wizard (server URL + mic), one dictation session, one report
+      draft → finalize → approve against the staging server; open the
+      **AI Models** screen and pull one model end-to-end.
+
+**Opt-in path — signed MSIX (auto-update).** MSIX packaging and signing cannot
+be produced from Linux CI (makeappx / SignTool are Windows tools); this stays
+the manual step for clinics that want silent auto-updates:
 
 1. On a Windows 10/11 machine with the .NET 10 SDK:
    `dotnet publish client/MedicalScribe.WPF -c Release -r win-x64`
@@ -61,9 +78,6 @@ SignTool are Windows tools); this is the manual step of the release.
 4. Publish the `.msix` + the filled `MedicalScribe.appinstaller.template.xml`
    (auto-update policy: hourly checks, silent install) to the clinic HTTPS
    update host.
-5. Smoke on one workstation: install, first-run wizard (server URL + mic),
-   one dictation session, one report draft → finalize → approve against the
-   staging server.
 
 Signing + MSIX on the CI Windows runner remains open (see honesty ledger in
 README) — it needs one iteration with the real certificate artifacts.
