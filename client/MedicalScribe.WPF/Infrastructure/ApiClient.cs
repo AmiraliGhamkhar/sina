@@ -183,7 +183,7 @@ public sealed class ApiClient : IApiClient
         }
         try
         {
-            return await stream.ReadAsync<T>(JsonOptions, ct);
+            return await JsonSerializer.DeserializeAsync<T>(stream, JsonOptions, ct);
         }
         catch (JsonException ex)
         {

@@ -20,6 +20,7 @@ using System.Threading.Tasks;
 // generalized into a "virtual audio" deny-list.
 using MedicalScribe.WPF.Infrastructure;
 using System.Diagnostics;
+using NAudio;
 using NAudio.CoreAudioApi;
 using NAudio.Wave;
 
@@ -57,7 +58,7 @@ public sealed class NAudioCaptureService : IAudioCaptureService
             try
             {
                 using var enumerator = new MMDeviceEnumerator();
-                using var def = enumerator.GetDefaultAudioEndpoint(DataCapture, Role.Multimedia);
+                using var def = enumerator.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Multimedia);
                 defaultId = def.ID;
             }
             catch (Exception)
