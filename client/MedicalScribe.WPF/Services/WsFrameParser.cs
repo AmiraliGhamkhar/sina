@@ -15,7 +15,6 @@ using System.Net.WebSockets;
 // WebSocket frame model + pure parser for server→client frames
 // (docs/WEBSOCKET_PROTOCOL.md v1). Deliberately allocation-light and
 // UI-free so it is unit-testable on any runner.
-using System.Text.Json;
 
 namespace MedicalScribe.WPF.Services;
 

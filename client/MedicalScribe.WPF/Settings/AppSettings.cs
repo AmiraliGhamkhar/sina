@@ -16,7 +16,6 @@ using System.Threading.Tasks;
 // AppSettings.cs — same load-once/save-on-change pattern with safe fallback
 // to defaults on corruption; moved to MedicalScribe paths and trimmed to the
 // fields this platform needs (no clipboard/whisper paths — STT is server-side).
-using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace MedicalScribe.WPF.Settings;

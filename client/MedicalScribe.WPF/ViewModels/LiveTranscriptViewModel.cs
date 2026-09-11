@@ -17,7 +17,6 @@ using System.Net.WebSockets;
 // SetInterim; the editing behaviors are implemented now because they are
 // pure view-model logic (and unit-testable without audio).
 using System.Collections.ObjectModel;
-using System.Text;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using MedicalScribe.WPF.Models;

@@ -11,7 +11,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import BaseModel, Field, SecretStr
+from pydantic import BaseModel, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -256,6 +256,20 @@ class Settings(BaseSettings):
     def is_production(self) -> bool:
         return self.server.env == "production"
 
+    @model_validator(mode="after")
+    def _production_fail_closed(self) -> Settings:
+        """Production must carry real auth material — enforced on the MODEL so
+        direct Settings(...) construction cannot bypass it (the loader's check
+        stays as a redundant belt-and-braces)."""
+        if self.is_production:
+            secret = self.auth.jwt_secret
+            if secret is None or len(secret.get_secret_value()) < 32:
+                raise ValueError(
+                    "production requires MS_AUTH__JWT_SECRET with >= 32 chars "
+                    "(openssl rand -base64 48)"
+                )
+        return self
+
     def provider_config(self, kind: str, name: str) -> dict:
         """Project the settings slice for a provider into the factory dict.
 
@@ -359,11 +373,6 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    settings = Settings()
-    # fail-closed: production must have real auth material
-    if settings.is_production:
-        if not settings.auth.jwt_secret or len(settings.auth.jwt_secret.get_secret_value()) < 32:
-            raise RuntimeError(
-                "production requires MS_AUTH__JWT_SECRET with >= 32 chars (openssl rand -base64 48)"
-            )
-    return settings
+    # production's fail-closed secret check is a model validator — it fires
+    # here and on every direct Settings(...) construction alike
+    return Settings()

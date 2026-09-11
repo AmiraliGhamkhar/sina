@@ -15,7 +15,6 @@ using System.Threading.Tasks;
 //   {"error":{"code":"AUTH_NOT_IMPLEMENTED","message":"..."}}
 // ViewModels switch on Code (stable), display Message.
 using System.Net;
-using System.Text.Json;
 
 namespace MedicalScribe.WPF.Infrastructure;
 

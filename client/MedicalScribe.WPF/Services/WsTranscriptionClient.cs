@@ -20,8 +20,6 @@ using System.Threading.Tasks;
 //  • bounded reconnect with exponential backoff (ReconnectPolicy)
 // All UI-thread marshaling happens in DictationSession, not here.
 using System.Net.WebSockets;
-using System.Text;
-using System.Text.Json;
 using System.Threading.Channels;
 using MedicalScribe.WPF.Infrastructure;
 using MedicalScribe.WPF.Models;

@@ -122,3 +122,19 @@ def test_resolve_principal_guards(settings):
         Headers({"authorization": "Bearer dev-token-1234567890"}), QueryParams(), settings
     )
     assert p is not None and p.is_dev
+
+
+def test_production_fail_closed_on_weak_jwt_secret():
+    """Security invariant: production Settings refuse to construct without a
+    >=32-char JWT secret — on the MODEL, so no construction path can bypass
+    it (the loader check is redundant belt-and-braces)."""
+    import pydantic
+    import pytest
+    from api.config import Settings
+
+    for bad in (None, "too-short"):
+        with pytest.raises(pydantic.ValidationError):
+            Settings(server={"env": "production"}, auth={"jwt_secret": bad})
+    # strong secret + dev env are unaffected
+    Settings(server={"env": "production"}, auth={"jwt_secret": "x" * 48})
+    Settings(server={"env": "dev"})
