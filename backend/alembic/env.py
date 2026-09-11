@@ -17,8 +17,13 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy.engine import Connection
 
-# make `api` + `ai` importable when alembic runs from backend/
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+# make `api` (backend/) and `ai` (repo root) importable regardless of how
+# alembic is invoked — the editable install is NOT required for migrations
+_here = os.path.dirname(__file__)
+for _p in (os.path.join(_here, ".."), os.path.join(_here, "..", "..")):
+    _p = os.path.abspath(_p)
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 
 from api.db.engine import normalize_database_url  # noqa: E402
 from api.models.orm import ALL_MODELS, Base  # noqa: E402, F401 — imports register tables
