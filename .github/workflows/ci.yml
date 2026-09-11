@@ -56,7 +56,22 @@ jobs:
         run: ruff check ai backend tests
 
       - name: Tests (pytest)
-        run: python -m pytest -r fx --color=yes
+        run: |
+          set -o pipefail
+          python -m pytest -r fx --color=yes 2>&1 | tee pytest.log
+
+      # The sandboxed dev environment cannot fetch Actions blob logs, so every
+      # failing step mirrors its tail into a check-run annotation (readable via
+      # the REST API). Harmless on normal failures; remove once redundant.
+      - name: Mirror pytest failure into annotation
+        if: failure()
+        run: |
+          python - <<'EOF'
+          import pathlib
+          tail = pathlib.Path("pytest.log").read_text(errors="replace")[-3800:]
+          ann = tail.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A").replace("|", "%7C")
+          print(f"::error file=pytest.log::{ann}")
+          EOF
 
   client-linux:
     name: WPF client · compile check (Linux targeting pack)
@@ -64,6 +79,11 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+
+      # setup-dotnet's NuGet cache step hard-fails when ~/.nuget/packages
+      # does not exist yet (fresh runner, pre-restore).
+      - name: Ensure nuget cache dir exists
+        run: mkdir -p "$HOME/.nuget/packages"
 
       - uses: actions/setup-dotnet@v4
         with:
@@ -74,7 +94,20 @@ jobs:
       # EnableWindowsTargeting in both csproj files makes this a pure-compile
       # gate: catches C#/XAML codegen regressions without a Windows runner.
       - name: Build (Release)
-        run: dotnet build client/MedicalScribe.sln -c Release --verbosity minimal
+        run: |
+          set -o pipefail
+          dotnet build client/MedicalScribe.sln -c Release --verbosity minimal 2>&1 | tee client-build.log
+
+      - name: Mirror build failure into annotation
+        if: failure()
+        run: |
+          python3 - <<'EOF'
+          import pathlib, re
+          raw = pathlib.Path("client-build.log").read_text(errors="replace")
+          errs = [l for l in raw.splitlines() if re.search(r"error|Error\s", l)][:40] or raw.splitlines()[-40:]
+          ann = "\n".join(errs)[-3800:].replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A").replace("|", "%7C")
+          print(f"::error file=client-build.log::{ann}")
+          EOF
 
   client-windows:
     name: WPF client · build + tests (Windows)
@@ -83,6 +116,10 @@ jobs:
     needs: client-linux # skip the Windows queue unless it even compiles
     steps:
       - uses: actions/checkout@v4
+
+      - name: Ensure nuget cache dir exists
+        shell: bash
+        run: mkdir -p "$HOME/.nuget/packages"
 
       - uses: actions/setup-dotnet@v4
         with:
@@ -94,14 +131,28 @@ jobs:
         run: dotnet restore client/MedicalScribe.sln
 
       - name: Build (Release)
-        run: dotnet build client/MedicalScribe.sln -c Release --no-restore
+        run: dotnet build client/MedicalScribe.sln -c Release --no-restore 2>&1 | Tee-Object -FilePath client-build.log
 
       - name: Test (xunit — parser, reconnect policy, transcript sink)
         run: >-
           dotnet test client/MedicalScribe.WPF.Tests/MedicalScribe.WPF.Tests.csproj
           -c Release --no-build
           --logger "trx;LogFileName=client-tests.trx"
-          --results-directory TestResults
+          --results-directory TestResults 2>&1 | Tee-Object -FilePath client-test.log
+
+      - name: Mirror failure into annotation
+        if: failure()
+        shell: pwsh
+        run: |
+          $log = if (Test-Path client-test.log) { "client-test.log" } elseif (Test-Path client-build.log) { "client-build.log" } else { "" }
+          if ($log) {
+            $raw = (Get-Content $log -Raw)
+            $tail = $raw.Substring([Math]::Max(0, $raw.Length - 3500))
+            $ann = $tail.Replace("%","%25").Replace("`r","").Replace("`n","%0A").Replace("|","%7C")
+            Write-Output "::error file=$log::$ann"
+          } else {
+            Write-Output "::error file=client-windows::build/test step failed before any log was produced"
+          }
 
       - name: Upload test results (on failure)
         if: failure()
