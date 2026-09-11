@@ -121,3 +121,50 @@ Do not blindly copy their architecture.
 Do not preserve their UI/framework choices when they conflict
 with this project's architecture.
 Do not copy code without preserving the applicable license/attribution.
+---
+
+## Phase 1 usage log (2026-09-10)
+
+This map was followed during the Phase 1 inspection. Per-reference take/leave
+decisions, conflict resolutions, and the exact files where adapted concepts
+landed are recorded in:
+
+- `docs/ASSESSMENT.md` — analysis + implementation order
+- `docs/THIRD_PARTY_NOTICES.md` — attribution index (all four references are MIT)
+- `docs/ARCHITECTURE.md` — target design (only reference *patterns* survive here)
+
+No code was copied from reference repositories; SpeakType-derived client
+patterns carry in-file attribution headers.
+
+## Phase 2 usage log (2026-09-11)
+
+- SpeakType (MIT) — `AudioRecorder.cs`/`AudioDeviceHelper.cs` patterns adapted
+  into `client/MedicalScribe.WPF/Audio/NAudioCaptureService.cs` (WaveInEvent
+  16 kHz mono loop, RMS level math normalized to 0..1, "skip virtual devices,
+  prefer names containing mic" auto-pick — Steam hint generalized). WAV
+  writing deliberately NOT taken (STT is server-side).
+- No reference code copied for the WS client or the backend hub; both follow
+  this repo's frozen protocol doc. `frontend/` still intentionally empty.
+
+## Phase 3 usage log (2026-09-11)
+
+- No reference code copied. Adapter *patterns* follow the frozen contracts in
+  `ai/base.py` (per ASSESSMENT §2: whisper-server stays an EXTERNAL service —
+  no spawning, no SDK-embedded inference; cloud traffic only from the
+  backend). The Deepgram/Speechmatics wire formats are implemented from their
+  public protocol shapes and pinned by fixture tests in `tests/fixtures/`
+  rather than live accounts.
+- openai-compat HTTP plumbing for qwen-asr mirrors the llama-server pattern
+  already in `ai/llm/openai_compat.py` (same repo module, not a reference one).
+
+## Phase 4 usage log (2026-09-11)
+
+- Phlox (MIT) — the *strict-JSON + repair round-trip* idea for structured note
+  output informed `api/services/note_prompt.py` (message shape + fail-closed
+  after one attempt). No code copied; prompt contract, sentinels, fidelity
+  check and provider adapters are this repo's own.
+- open-medical-scribe (MIT) — mock-provider-parity rule followed: the mock
+  LLM now satisfies the same grounding contract as real providers so the
+  pipeline is honest end-to-end without keys.
+- Cloud LLM wires (OpenAI/Anthropic/Gemini) implemented from public API
+  shapes, fixture-verified; SDKs deliberately avoided (httpx-only rule).

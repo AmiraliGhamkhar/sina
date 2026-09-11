@@ -1,0 +1,33 @@
+{
+  "metadata": {"request_id": "fixed-fixture-1", "channels": 1, "transaction_key": "deprecated"},
+  "results": {
+    "channels": [
+      {
+        "alternatives": [
+          {
+            "transcript": "بیمار با درد قفسه سینه مراجعه کرد. ECG بدون تغییر است.",
+            "confidence": 0.94,
+            "words": [
+              {"word": "بیمار", "start": 0.1, "end": 0.42, "confidence": 0.97}
+            ]
+          }
+        ]
+      }
+    ],
+    "segments": [
+      {
+        "id": "9cb228ce", "start": 0.1, "end": 2.9, "text": "بیمار با درد قفسه سینه مراجعه کرد.",
+        "confidence": 0.96, "speaker": 0
+      },
+      {
+        "id": "2be09b19", "start": 3.0, "end": 5.2, "text": "ECG بدون تغییر است.",
+        "confidence": 0.91, "speaker": 0
+      },
+      {
+        "id": "77ab0e97", "start": 5.6, "end": 9.1, "text": "دوز 50 mg aspirin در نظر گرفته شد. no allergy.",
+        "confidence": 0.89, "speaker": 0
+      }
+    ],
+    "utterances": []
+  }
+}

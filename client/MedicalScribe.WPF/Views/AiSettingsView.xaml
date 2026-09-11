@@ -1,0 +1,56 @@
+<UserControl x:Class="MedicalScribe.WPF.Views.AiSettingsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="24">
+        <StackPanel MaxWidth="900">
+            <Grid>
+                <TextBlock Text="AI settings (read-only)" Style="{StaticResource SectionTitle}"/>
+                <Button Content="Probe providers" Style="{StaticResource SecondaryButton}" HorizontalAlignment="Right" VerticalAlignment="Top"
+                        Command="{Binding RefreshCommand}"/>
+            </Grid>
+            <TextBlock Margin="0,0,0,12" Foreground="{StaticResource MutedInk}"
+                       Text="Provider credentials and model configuration live exclusively on the server. This screen shows what the API exposes; changes to secrets must be made server-side (docs/DEPLOYMENT.md)."/>
+
+            <Border Style="{StaticResource Card}" Margin="0,0,0,12">
+                <StackPanel>
+                    <TextBlock Text="Routing mode (request-level policy)" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                    <ComboBox ItemsSource="{Binding RoutingModes}" SelectedItem="{Binding RoutingMode}" Width="180" HorizontalAlignment="Left"/>
+                    <TextBlock Text="{Binding PrivacyNote}" Foreground="#92400E" Margin="0,8,0,0" FontSize="12.5"/>
+                </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource Card}">
+                <StackPanel>
+                    <TextBlock Text="Providers registered on the server" FontWeight="SemiBold" Margin="0,0,0,8"/>
+                    <ItemsControl ItemsSource="{Binding Providers}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border BorderBrush="{StaticResource Hairline}" BorderThickness="0,0,0,1" Padding="0,8">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="160"/>
+                                            <ColumnDefinition Width="60"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="150"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel>
+                                            <TextBlock Text="{Binding Name}" FontWeight="SemiBold"/>
+                                            <TextBlock Text="{Binding Kind}" FontSize="11" Foreground="{StaticResource MutedInk}"/>
+                                        </StackPanel>
+                                        <TextBlock Grid.Column="1" Text="{Binding Capabilities.PrivacyClass}" VerticalAlignment="Center" FontSize="12"/>
+                                        <TextBlock Grid.Column="2" Text="{Binding Description}" Foreground="{StaticResource MutedInk}" FontSize="12" VerticalAlignment="Center" Margin="12,0"/>
+                                        <TextBlock Grid.Column="3" VerticalAlignment="Center" HorizontalAlignment="Right" FontSize="12"
+                                                   Foreground="{StaticResource MutedInk}"
+                                                   Text="{Binding Configured, StringFormat='configured: {0}'}"/>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <TextBlock Text="{Binding LoadError}" Foreground="{StaticResource Danger}"
+                               Visibility="{Binding LoadError, Converter={StaticResource NullToCollapsed}}" Margin="0,8,0,0"/>
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

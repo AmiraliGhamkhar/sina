@@ -1,0 +1,47 @@
+<UserControl x:Class="MedicalScribe.WPF.Views.PatientEncounterView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="24">
+        <StackPanel MaxWidth="760">
+            <TextBlock Text="Patient &amp; encounter" Style="{StaticResource SectionTitle}"/>
+
+            <Border Style="{StaticResource Card}">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <StackPanel Grid.Row="0" Grid.Column="0" Margin="0,0,12,0">
+                        <TextBlock Text="MRN" Style="{StaticResource FieldLabel}"/>
+                        <TextBox Text="{Binding PatientMrn, UpdateSourceTrigger=PropertyChanged}"/>
+                    </StackPanel>
+                    <StackPanel Grid.Row="0" Grid.Column="1">
+                        <TextBlock Text="Patient name" Style="{StaticResource FieldLabel}"/>
+                        <TextBox Text="{Binding PatientName, UpdateSourceTrigger=PropertyChanged}"/>
+                    </StackPanel>
+
+                    <StackPanel Grid.Row="1" Grid.Column="0" Margin="0,0,12,0">
+                        <TextBlock Text="Encounter type" Style="{StaticResource FieldLabel}"/>
+                        <ComboBox ItemsSource="{Binding EncounterTypes}" SelectedItem="{Binding EncounterType}"/>
+                    </StackPanel>
+                    <StackPanel Grid.Row="1" Grid.Column="1">
+                        <TextBlock Text="Privacy" Style="{StaticResource FieldLabel}"/>
+                        <CheckBox Content="Private encounter (forces local AI providers)"
+                                  IsChecked="{Binding PrivateEncounter}" Margin="0,6,0,0"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <Border Style="{StaticResource Card}" Margin="0,14,0,0">
+                <TextBlock Text="{Binding PersistenceHint}" Style="{StaticResource Hint}"/>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

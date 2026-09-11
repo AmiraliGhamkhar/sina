@@ -1,0 +1,17 @@
+# Prometheus scrape config (Phase 8 completes the /metrics exposition; the
+# app's in-process counter names already match these recording rules' inputs).
+global:
+  scrape_interval: 15s
+  evaluation_interval: 30s
+
+scrape_configs:
+  - job_name: medicalscribe-api
+    metrics_path: /metrics          # Phase 8: Prometheus text endpoint
+    static_configs:
+      - targets: ["api:8000"]
+  - job_name: postgres
+    static_configs:
+      - targets: ["postgres-exporter:9187"]   # add when DB lands (Phase 7)
+  - job_name: redis
+    static_configs:
+      - targets: ["redis-exporter:9121"]      # add when queues/ratelimits land (Phase 7)
