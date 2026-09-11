@@ -1,0 +1,19 @@
+{
+  "metadata": {
+    "request_id": "fixed-fixture-sm",
+    "created": "2026-09-11T00:00:00Z",
+    "duration": 12.4,
+    "language_pack": {"id": "fa", "operating_level": "standard"}
+  },
+  "results": {
+    "transcript": "بیمار با درد قفسه سینه مراجعه کرد. MRI چپ بدون effusion.",
+    "elements": [
+      {"start_time": 0.2, "end_time": 0.5, "is_final": true, "alternatives": [{"confidence": 0.93, "content": "بیمار"}], "type": "Word", "value": "بیمار"},
+      {"start_time": 0.5, "end_time": 0.7, "is_punctuation": true, "type": "Punctuation", "value": "."},
+      {"start_time": 0.9, "end_time": 1.2, "is_final": true, "alternatives": [{"confidence": 0.9, "content": "MRI"}], "type": "Word", "value": "MRI"},
+      {"start_time": 1.2, "end_time": 1.5, "is_final": true, "type": "Word", "value": "چپ", "alternatives": [{"confidence": 0.88, "content": "چپ"}]},
+      {"start_time": 1.5, "end_time": 2.0, "is_final": true, "type": "Word", "value": "بدون", "alternatives": [{"confidence": 0.9, "content": "بدون"}]},
+      {"start_time": 2.0, "end_time": 2.6, "is_final": true, "is_end_of_transcript": true, "type": "Word", "value": "effusion", "alternatives": [{"confidence": 0.92, "content": "effusion"}]}
+    ]
+  }
+}

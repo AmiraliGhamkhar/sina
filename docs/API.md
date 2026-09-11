@@ -39,6 +39,12 @@ data must not echo back through error paths).
 | GET | `/api/v1/providers?kind=stt|llm&probe=health` | optional | registry listing: `{name, kind, description, configured, capabilities{privacy_class,...}, health?}` |
 | GET | `/api/v1/observability/stats` | optional | process metrics snapshot (Prometheus endpoint: P8) |
 
+## Batch transcription (landed in Phase 3)
+
+| Method | Path | Auth | Notes |
+|---|---|---|---|
+| POST | `/api/v1/transcribe/batch` | optional | multipart: `file` (WAV 16-bit mono **or** raw mono PCM16 with `sample_rate`), optional form fields `language`, `mode`, `privacy_required`, `provider`, `context_hints` (comma-separated hotwords). Routes through the same privacy-walled router (`TRANSCRIBE_BATCH` → only `supports_batch` providers). Returns `{request_id, provider, mode, privacy_override_applied, language, audio_duration_ms, segment_count, text, latency_ms, segments[]}`. Errors: 400 `VALIDATION` (bad/empty/stereo/non-16-bit audio), 413 (over `MS_STT__BATCH_MAX_BYTES`), 502 `PROVIDER_UNAVAILABLE`, 503 `NO_PROVIDER`. Audio is processed and dropped — nothing stored, audit records metadata only. |
+
 ## Transcripts (live session store — landed in Phase 2)
 
 In-memory only until Phase 7 persistence; last 200 ended sessions are kept
@@ -55,7 +61,6 @@ These expose what the WS stream finalized; interim frames are never stored.
 
 - `POST /api/v1/patients/search`, `POST /api/v1/encounters` — P7
 - encounter-scoped transcript/report APIs (`/api/v1/transcripts?encounter_id=…`) — P7 (session-scoped live API already shipped in P2)
-- `POST /api/v1/transcribe/batch` (multipart audio; Deepgram/whisper-style) — P3
 - `POST /api/v1/report-templates` (+ `POST /report-templates/extract-from-example`) — P6
 - `POST /api/v1/reports/{encounter_id}/draft` → `PATCH .../sections` → `POST .../finalize` → `POST .../approve` — P6/P7 (two-step sign-off is non-negotiable)
 - `GET /api/v1/audit/...` (admin) — P7

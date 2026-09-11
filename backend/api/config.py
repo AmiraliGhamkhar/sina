@@ -88,23 +88,59 @@ class LlmConfig(BaseModel):
 
 
 class WhisperServerConfig(BaseModel):
-    url: str | None = None  # whisper.cpp/whisper-server HTTP endpoint (Phase 3)
+    """whisper.cpp whisper-server (external process; never spawned here)."""
+
+    url: str | None = None  # e.g. http://127.0.0.1:8001 — routes only if set
     model: str = "large-v3"
     timeout_s: float = 300.0
+    api_key: SecretStr | None = None  # optional reverse-proxy bearer auth
+    #: medical hotwords → whisper initial_prompt (embedded-English terms)
+    hotwords: list[str] = []
+    # VAD-windowed pseudo-streaming (ai/stt/_common.VadSegmenter)
+    vad_silence_ms: int = 600
+    vad_interim_ms: int = 1500
+    vad_pre_roll_ms: int = 300
+    vad_threshold: float = 0.02
+    max_segment_ms: int = 30000
 
 
 class QwenAsrConfig(BaseModel):
-    url: str | None = None  # Phase 3
+    """Qwen2-Audio served behind an OpenAI-audio-compatible HTTP endpoint."""
+
+    url: str | None = None
+    model: str = "qwen2-audio-instruct"
+    timeout_s: float = 180.0
+    api_key: SecretStr | None = None
+    vad_silence_ms: int = 600
+    vad_interim_ms: int = 2000
+    vad_pre_roll_ms: int = 300
+    vad_threshold: float = 0.02
+    max_segment_ms: int = 20000
 
 
 class SpeechmaticsConfig(BaseModel):
-    api_key: SecretStr | None = None  # Phase 3
-    region: str = "eu2"
+    api_key: SecretStr | None = None
+    region: str = "eu2"  # eu2 | us
+    batch_url: str | None = None  # override (defaults from region)
+    rt_url: str | None = None
+    language: str = "fa"  # batch default; per-request language wins
+    operating_domain: str = "general"  # speechmatics operating domain
+    timeout_s: float = 60.0
+    job_poll_interval_s: float = 1.0
+    job_timeout_s: float = 300.0
+    max_retries: int = 2
 
 
 class DeepgramConfig(BaseModel):
-    api_key: SecretStr | None = None  # Phase 3
+    api_key: SecretStr | None = None
     model: str = "nova-2-general"
+    base_url: str | None = None  # https proxy override for self-hosted/egress
+    ws_url: str | None = None
+    endpointing_ms: int = 300
+    timeout_s: float = 60.0
+    #: baseline keyword boosting (drug names, laterality terms); per-request
+    #: context hints are appended to this
+    keywords: list[str] = []
 
 
 class SttConfig(BaseModel):
@@ -115,6 +151,8 @@ class SttConfig(BaseModel):
     qwen_asr: QwenAsrConfig = Field(default_factory=QwenAsrConfig)
     speechmatics: SpeechmaticsConfig = Field(default_factory=SpeechmaticsConfig)
     deepgram: DeepgramConfig = Field(default_factory=DeepgramConfig)
+    #: batch transcribe upload cap in bytes (413 beyond this)
+    batch_max_bytes: int = 64 * 1024 * 1024
 
 
 class RoutingConfig(BaseModel):
@@ -191,6 +229,58 @@ class Settings(BaseSettings):
             return {}
         if kind == "stt" and name == "mock":
             return {"interim_delay_s": self.stt.mock_interim_delay_s}
+        if kind == "stt" and name == "whisper-local":
+            w = self.stt.whisper_server
+            return {
+                "url": w.url or "",
+                "model": w.model,
+                "timeout_s": w.timeout_s,
+                "api_key": w.api_key.get_secret_value() if w.api_key else None,
+                "hotwords": list(w.hotwords),
+                "vad_silence_ms": w.vad_silence_ms,
+                "vad_interim_ms": w.vad_interim_ms,
+                "vad_pre_roll_ms": w.vad_pre_roll_ms,
+                "vad_threshold": w.vad_threshold,
+                "max_segment_ms": w.max_segment_ms,
+            }
+        if kind == "stt" and name == "qwen-asr":
+            q = self.stt.qwen_asr
+            return {
+                "url": q.url or "",
+                "model": q.model,
+                "timeout_s": q.timeout_s,
+                "api_key": q.api_key.get_secret_value() if q.api_key else None,
+                "vad_silence_ms": q.vad_silence_ms,
+                "vad_interim_ms": q.vad_interim_ms,
+                "vad_pre_roll_ms": q.vad_pre_roll_ms,
+                "vad_threshold": q.vad_threshold,
+                "max_segment_ms": q.max_segment_ms,
+            }
+        if kind == "stt" and name == "speechmatics":
+            sm = self.stt.speechmatics
+            return {
+                "api_key": sm.api_key.get_secret_value() if sm.api_key else None,
+                "region": sm.region,
+                "batch_url": sm.batch_url,
+                "rt_url": sm.rt_url,
+                "language": sm.language,
+                "operating_domain": sm.operating_domain,
+                "timeout_s": sm.timeout_s,
+                "job_poll_interval_s": sm.job_poll_interval_s,
+                "job_timeout_s": sm.job_timeout_s,
+                "max_retries": sm.max_retries,
+            }
+        if kind == "stt" and name == "deepgram":
+            dg = self.stt.deepgram
+            return {
+                "api_key": dg.api_key.get_secret_value() if dg.api_key else None,
+                "model": dg.model,
+                "base_url": dg.base_url,
+                "ws_url": dg.ws_url,
+                "endpointing_ms": dg.endpointing_ms,
+                "timeout_s": dg.timeout_s,
+                "keywords": list(dg.keywords),
+            }
         return {}
 
 

@@ -145,3 +145,14 @@ patterns carry in-file attribution headers.
   writing deliberately NOT taken (STT is server-side).
 - No reference code copied for the WS client or the backend hub; both follow
   this repo's frozen protocol doc. `frontend/` still intentionally empty.
+
+## Phase 3 usage log (2026-09-11)
+
+- No reference code copied. Adapter *patterns* follow the frozen contracts in
+  `ai/base.py` (per ASSESSMENT §2: whisper-server stays an EXTERNAL service —
+  no spawning, no SDK-embedded inference; cloud traffic only from the
+  backend). The Deepgram/Speechmatics wire formats are implemented from their
+  public protocol shapes and pinned by fixture tests in `tests/fixtures/`
+  rather than live accounts.
+- openai-compat HTTP plumbing for qwen-asr mirrors the llama-server pattern
+  already in `ai/llm/openai_compat.py` (same repo module, not a reference one).

@@ -43,7 +43,7 @@ Done notes (deviations recorded honestly):
 - Audio `seq`: client tracks capture sequence in `AudioChunk`; WS frames are
   content-addressed by hub (protocol allows omitting seq on binary frames).
 
-## Phase 3 — STT adapters (next)
+## Phase 3 — STT adapters ✅ (done — this build)
 - `whisper-local` (whisper-server HTTP; windowed pseudo-streaming with VAD,
   buffer/interval/silence params; fa+en language + initial prompt hotwords).
 - `qwen-asr` adapter (service HTTP/WS, fa-robust).
@@ -57,7 +57,34 @@ Done notes (deviations recorded honestly):
   health-probed from `/api/v1/providers?probe=health`; registry listing shows
   `configured` correctly per env.
 
-## Phase 4 — LLM adapters & report prompts
+
+Done notes (deviations recorded honestly):
+- All four adapters landed: `whisper-local` (whisper.cpp `/inference`, WAV
+  container, hotwords via `initial_prompt`), `qwen-asr` (OpenAI-audio
+  `transcriptions` endpoint, verbose_json), `deepgram` (prerecorded HTTP +
+  live WS with keyword boosting incl. drug names/laterality) and
+  `speechmatics` (batch job lifecycle + realtime WS, `fa` default,
+  operating domain configurable).
+- "Windowed pseudo-streaming with VAD" is real: shared `ai/stt/_common.py`
+  energy VAD (buffer/interval/silence/pre-roll knobs) dispatches utterances
+  as batch requests; long utterances re-dispatch for interims. Timelines are
+  audio-time, not wall-clock → deterministic tests.
+- Cloud WS adapters sit behind a `WsTransport` seam
+  (`ai/stt/ws_transport.py`); production uses `websockets`, tests use
+  scripted transports — CI is network-free by design.
+- Acceptance met: 108 backend tests, fixtures under `tests/fixtures/`
+  (medical corpora verify number/dose/negation/laterality/embedded-English
+  preservation), `/api/v1/providers?probe=health` exercises each adapter's
+  health probe, `configured` per env is asserted.
+- Not covered honestly: no calls against the real Deepgram/Speechmatics
+  services (no credentials in this environment) — protocol conformance is
+  fixture-verified; first live-account run should re-verify against vendor
+  sandbox. Qwen service shape assumed OpenAI-audio-compatible.
+- `POST /api/v1/transcribe/batch` landed early (was P3 line): multipart
+  WAV/PCM16 upload, routed with privacy wall enforced, 413/400 validated,
+  audio never persisted, metadata-only audit.
+
+## Phase 4 — LLM adapters & report prompts (next)
 - `openai`, `anthropic`, `gemini` adapters (native SDKs avoided: httpx only);
   usage/token accounting into metrics + `ai_requests`.
 - Grounded note-prompt builder (transcript + patient context + template

@@ -155,14 +155,18 @@ class ProviderRegistry:
 def build_default_registry() -> ProviderRegistry:
     """Registry with the providers bundled in this repo.
 
-    Later phases add: whisper-local / qwen-asr (STT), speechmatics / deepgram
-    (cloud STT), openai / anthropic / gemini (cloud LLM). Each addition is a
-    single ``register()`` call plus a module under ai/stt or ai/llm — no other
+    Phase 3 added the STT adapters above (whisper-local, qwen-asr, deepgram,
+    speechmatics). Remaining: openai / anthropic / gemini (cloud LLM, Phase 4).
+    Each addition stays a single ``register()`` call plus a module under
     file should need to change.
     """
     from ai.llm.llama_server import LlamaServerProvider, llama_server_configured
     from ai.llm.mock import MockLlmProvider
+    from ai.stt.deepgram import DeepgramProvider, deepgram_configured
     from ai.stt.mock import MockSttProvider
+    from ai.stt.qwen_asr import QwenAsrProvider, qwen_asr_configured
+    from ai.stt.speechmatics import SpeechmaticsProvider, speechmatics_configured
+    from ai.stt.whisper_server import WhisperServerProvider, whisper_local_configured
 
     registry = ProviderRegistry()
     registry.register(
@@ -177,6 +181,88 @@ def build_default_registry() -> ProviderRegistry:
             ),
             factory=lambda cfg: MockSttProvider(cfg),
             description="Deterministic mock STT used by tests and Phase 1/2 demos.",
+        )
+    )
+    registry.register(
+        ProviderDescriptor(
+            name="whisper-local",
+            kind=ProviderKind.STT,
+            capabilities=ProviderCapabilities(
+                privacy=PrivacyClass.LOCAL,
+                supports_streaming=True,
+                supports_batch=True,
+                languages=("*",),
+                latency_hint_ms=2500,
+            ),
+            factory=lambda cfg: WhisperServerProvider(cfg),
+            configured=whisper_local_configured,
+            description=(
+                "Self-hosted whisper.cpp server (external process); VAD-windowed "
+                "pseudo-streaming. Configure MS_STT__WHISPER_SERVER__URL."
+            ),
+            config_keys=("stt.whisper_server.url",),
+        )
+    )
+    registry.register(
+        ProviderDescriptor(
+            name="qwen-asr",
+            kind=ProviderKind.STT,
+            capabilities=ProviderCapabilities(
+                privacy=PrivacyClass.LOCAL,
+                supports_streaming=True,
+                supports_batch=True,
+                languages=("fa", "en", "*"),
+                latency_hint_ms=3000,
+            ),
+            factory=lambda cfg: QwenAsrProvider(cfg),
+            configured=qwen_asr_configured,
+            description=(
+                "Qwen2-Audio ASR behind an OpenAI-audio-compatible HTTP service; "
+                "strong Persian. Configure MS_STT__QWEN_ASR__URL."
+            ),
+            config_keys=("stt.qwen_asr.url",),
+        )
+    )
+    registry.register(
+        ProviderDescriptor(
+            name="deepgram",
+            kind=ProviderKind.STT,
+            capabilities=ProviderCapabilities(
+                privacy=PrivacyClass.CLOUD,
+                supports_streaming=True,
+                supports_batch=True,
+                languages=("*",),
+                cost_hint_per_unit=0.0043,
+                latency_hint_ms=800,
+            ),
+            factory=lambda cfg: DeepgramProvider(cfg),
+            configured=deepgram_configured,
+            description=(
+                "Deepgram Nova-2 via WebSocket streaming + prerecorded HTTP; "
+                "keyword boosting for medical terms; key via MS_STT__DEEPGRAM__* env."
+            ),
+            config_keys=("stt.deepgram.api_key",),
+        )
+    )
+    registry.register(
+        ProviderDescriptor(
+            name="speechmatics",
+            kind=ProviderKind.STT,
+            capabilities=ProviderCapabilities(
+                privacy=PrivacyClass.CLOUD,
+                supports_streaming=True,
+                supports_batch=True,
+                languages=("fa", "en", "*"),
+                cost_hint_per_unit=0.006,
+                latency_hint_ms=900,
+            ),
+            factory=lambda cfg: SpeechmaticsProvider(cfg),
+            configured=speechmatics_configured,
+            description=(
+                "Speechmatics realtime + batch with Persian support. "
+                "key via MS_STT__SPEECHMATICS__* env."
+            ),
+            config_keys=("stt.speechmatics.api_key",),
         )
     )
     registry.register(

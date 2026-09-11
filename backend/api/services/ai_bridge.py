@@ -49,6 +49,7 @@ def build_candidates(app, kind: ProviderKind) -> list[ProviderCandidate]:
                 privacy=d.capabilities.privacy,
                 healthy=health.is_healthy(f"{kind.value}:{d.name}"),
                 supports_streaming=d.capabilities.supports_streaming,
+                supports_batch=d.capabilities.supports_batch,
                 languages=d.capabilities.languages,
                 latency_hint_ms=d.capabilities.latency_hint_ms,
                 cost_hint_per_unit=d.capabilities.cost_hint_per_unit,
@@ -70,6 +71,32 @@ def stt_route_request(app, start: SessionStart) -> RouteRequest:
         preferred=start.provider,
         strict_preference=False,  # a busy cloud pick may fall back; health does the rest
         language=start.language,
+        session_id=None,
+    )
+
+
+def batch_route_request(
+    app,
+    *,
+    language: str | None,
+    mode: str | None,
+    privacy_required: bool | None,
+    provider: str | None,
+) -> RouteRequest:
+    """Routing request for the batch transcribe endpoint (Phase 3)."""
+    settings = app.state.settings
+    privacy = (
+        privacy_required if privacy_required is not None else settings.routing.privacy_default
+    )
+    resolved_mode = RoutingMode(mode) if mode else RoutingMode(settings.routing.mode)
+    return RouteRequest(
+        task=TaskKind.TRANSCRIBE_BATCH,
+        kind=ProviderKind.STT,
+        mode=resolved_mode,
+        privacy_required=bool(privacy),
+        preferred=provider,
+        strict_preference=False,
+        language=language,
         session_id=None,
     )
 

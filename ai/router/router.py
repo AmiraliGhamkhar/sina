@@ -61,6 +61,7 @@ class ProviderCandidate:
     privacy: PrivacyClass
     healthy: bool = True
     supports_streaming: bool = True
+    supports_batch: bool = True
     languages: tuple[str, ...] = ("*",)
     latency_hint_ms: int = 500
     cost_hint_per_unit: float = 0.0
@@ -96,6 +97,8 @@ def _capable(candidate: ProviderCandidate, request: RouteRequest) -> bool:
     if candidate.kind is not request.kind:
         return False
     if request.task is TaskKind.TRANSCRIBE_STREAM and not candidate.supports_streaming:
+        return False
+    if request.task is TaskKind.TRANSCRIBE_BATCH and not candidate.supports_batch:
         return False
     if request.language and "*" not in candidate.languages:
         # "fa-en" mixed is satisfied by any provider claiming fa or en

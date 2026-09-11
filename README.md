@@ -33,7 +33,7 @@ Backend (Linux/macOS/Windows, Python 3.11+; production images use 3.12+):
 ```bash
 python -m venv .venv && .venv/bin/pip install -e ".[dev]"
 cp .env.example .env                     # set MS_AUTH__DEV_TOKEN, secrets optional in Phase 1
-.venv/bin/python -m pytest               # 72 tests: health, auth, ws protocol+audio flow, router, providers
+.venv/bin/python -m pytest               # 108 tests: health, auth, ws, providers/adapters, router, batch
 .venv/bin/python -m uvicorn api.main:app --app-dir backend --port 8000
 curl localhost:8000/health
 curl "localhost:8000/api/v1/providers?probe=health"
@@ -61,7 +61,7 @@ credentials arrive in Phase 7; the server answers 501 + a stable
 |---|---|---|
 | 1 | References → assessment → WPF shell → FastAPI shell → REST connectivity (+ WS **control plane**, provider contracts, compose/nginx/env) | ✅ done (this build) |
 | 2 | NAudio capture → WS audio → mock STT stream → live transcript (+ session transcript GET/PATCH) | ✅ done (this build) |
-| 3 | STT adapters: local whisper-server, qwen-asr, Speechmatics, Deepgram (stream+batch) | planned |
+| 3 | STT adapters: local whisper-server, qwen-asr, Speechmatics, Deepgram (stream+batch) + batch REST endpoint | ✅ done (this build) |
 | 4 | LLM adapters: llama-server (transport shipped in P1), OpenAI/Anthropic/Gemini + prompts | partial (P1 shipped llama-server client) |
 | 5 | Router: live health/latency/queue-depth, fallback chains (pure core + tracker shipped in P1) | partial |
 | 6 | Voice commands, terminology, templates, report generation, validation warnings | planned (command catalog served by manifest) |
@@ -111,9 +111,13 @@ credentials arrive in Phase 7; the server answers 501 + a stable
    Phase 7. Logout still has no revocation store.
 3. Heartbeat frames are idle-timeout only (4408); explicit app-level pings +
    nginx read-timeout tuning are deferred to Phase 8.
-4. Cloud STT/LLM adapters (Phase 3/4) and the router's live latency/queue
+4. Cloud STT adapters (Deepgram/Speechmatics) are verified against recorded
+   fixtures + scripted WS transports, never against live vendor accounts
+   (no credentials in this environment); first credentialed deployment should
+   smoke `GET /api/v1/providers?probe=health` and one batch upload per vendor.
+5. Cloud LLM adapters (Phase 4) and the router's live latency/queue
    signals (Phase 5) are interface-ready but unimplemented.
-5. Voice-command *parsing* (Phase 6) — the catalog + protocol frames exist,
+6. Voice-command *parsing* (Phase 6) — the catalog + protocol frames exist,
    recognition is stubbed server-side.
-6. Observability is process-local counters; Prometheus/OTel endpoints land in
+7. Observability is process-local counters; Prometheus/OTel endpoints land in
    Phase 8.

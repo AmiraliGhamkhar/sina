@@ -68,13 +68,15 @@ clinical documentation platform.
 - Errors: `ProviderError(retryable)` / `ProviderUnavailableError` — the
   router/health tracker consume the flags, never message strings.
 
-**Planned providers** (registered in `build_default_registry`, one register +
-one module each): STT `whisper-local` (whisper-server HTTP + windowed stream,
-pattern noted in docs/ASSESSMENT.md §2), `qwen-asr`, `speechmatics`
-(WS + context for fa), `deepgram` (WS + keyword boost: drug names, laterality
-words); LLM `llama-server` (shipped, §12 external-service rule), `openai`,
-`anthropic`, `gemini`, plus the two mocks (already shipped) that keep the full
-pipeline CI-testable without keys.
+**Registry membership** (one register + one module each). STT — all shipped:
+`whisper-local` (whisper-server HTTP + VAD-windowed pseudo-stream, pattern
+noted in docs/ASSESSMENT.md §2), `qwen-asr` (OpenAI-audio-compatible service),
+`speechmatics` (WS + batch job API, fa configured), `deepgram` (WS +
+prerecorded, keyword boost for drug names/laterality words). Cloud WS traffic
+goes through the `ai/stt/ws_transport.WsTransport` seam — tests run the exact
+protocol against scripted transports (zero network). LLM — `llama-server`
+(shipped, §12 external-service rule), planned: `openai`, `anthropic`,
+`gemini`. The two mocks keep the full pipeline CI-testable without keys.
 
 ## 4. AI routing (`ai/router`)
 
