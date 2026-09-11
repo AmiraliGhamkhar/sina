@@ -24,7 +24,7 @@ import uuid
 from fastapi import APIRouter, Request
 
 from ai.base import PrivacyClass, ProviderError, ProviderKind
-from ai.router import NoEligibleProviderError
+from ai.router import NoEligibleProviderError, route
 from api.auth.deps import OptionalPrincipal
 from api.errors import ApiError, ErrorCode
 from api.schemas.reports import (
@@ -34,7 +34,7 @@ from api.schemas.reports import (
     ReportDraftResponse,
     UsageOut,
 )
-from api.services.ai_bridge import llm_route_request, select_llm_provider
+from api.services.ai_bridge import build_candidates, llm_route_request
 from api.services.note_prompt import (
     MISSING_TOKEN,
     build_messages,
@@ -65,99 +65,157 @@ async def create_draft(
     metrics = app.state.metrics
 
     try:
-        decision, provider = await select_llm_provider(
+        route_request = llm_route_request(
             app,
-            llm_route_request(
-                app,
-                mode=body.mode,
-                privacy_required=body.privacy_required,
-                provider=body.provider,
-            ),
+            mode=body.mode,
+            privacy_required=body.privacy_required,
+            provider=body.provider,
         )
+        decision = route(route_request, build_candidates(app, ProviderKind.LLM))
     except NoEligibleProviderError as exc:
         raise ApiError(503, ErrorCode.NO_PROVIDER, str(exc)) from exc
-    except ProviderError as exc:
-        raise ApiError(
-            502,
-            ErrorCode.PROVIDER_UNAVAILABLE,
-            f"llm provider '{decision.provider}' failed to initialize: {exc}",
-        ) from exc
 
-    descriptor = app.state.ai_registry.get_descriptor(ProviderKind.LLM, decision.provider)
-    is_cloud = descriptor.capabilities.privacy is PrivacyClass.CLOUD
-    redact = is_cloud and settings.llm.cloud.redact_phi_for_cloud
-
+    settings_llm = settings.llm
+    registry = app.state.ai_registry
     sections = resolve_sections(
         [s.model_dump() for s in body.template.sections] if body.template and body.template.sections else None
     )
-    transcript = redact_phi(body.transcript) if redact else body.transcript
-    patient_context = (
-        body.patient_context.model_dump(exclude_none=True) if body.patient_context else None
-    )
-    if redact and patient_context:
-        patient_context = {k: redact_phi(str(v)) for k, v in patient_context.items()}
-    messages = build_messages(
-        transcript=transcript,
-        sections=sections,
-        patient_context=patient_context,
-        language=body.language,
-    )
+    raw_context = body.patient_context.model_dump(exclude_none=True) if body.patient_context else None
 
-    started = time.perf_counter()
+    # Phase 5: walk the router's chain (primary + privacy-safe fallbacks);
+    # redaction policy is re-derived per candidate because it is cloud-specific.
+    used_provider: str | None = None
+    completion = None
+    section_map: dict[str, str] = {}
     repaired = False
-    try:
-        completion = await provider.complete(
-            messages,
-            temperature=settings.llm.report_temperature,
-            max_tokens=settings.llm.report_max_tokens,
-            json_mode=True,
+    is_cloud = False
+    redact = False
+    output_error: str | None = None
+    attempts: list[dict] = []
+    last_retryable: bool | None = None
+
+    chain = [decision.provider, *(decision.fallbacks if settings.routing.fallback_enabled else ())]
+    for attempt_name in chain:
+        attempts_entry: dict = {"provider": attempt_name}
+        descriptor = registry.get_descriptor(ProviderKind.LLM, attempt_name)
+        is_cloud = descriptor.capabilities.privacy is PrivacyClass.CLOUD
+        redact = is_cloud and settings_llm.cloud.redact_phi_for_cloud
+
+        transcript = redact_phi(body.transcript) if redact else body.transcript
+        patient_context = dict(raw_context) if raw_context else None
+        if redact and patient_context:
+            patient_context = {k: redact_phi(str(v)) for k, v in patient_context.items()}
+        messages = build_messages(
+            transcript=transcript,
+            sections=sections,
+            patient_context=patient_context,
+            language=body.language,
         )
         try:
-            section_map = reconcile(parse_model_json(completion.text), sections)
-        except ValueError as parse_exc:  # malformed JSON / missing sections
-            if not settings.llm.repair_enabled:
-                raise ApiError(
-                    502,
-                    ErrorCode.PROVIDER_UNAVAILABLE,
-                    f"model output was not valid JSON ({type(parse_exc).__name__}); "
-                    "repair disabled via MS_LLM__REPAIR_ENABLED",
-                ) from parse_exc
-            repaired = True
+            provider = registry.create(
+                ProviderKind.LLM, attempt_name, settings.provider_config("llm", attempt_name)
+            )
+        except ProviderError as exc:
+            app.state.provider_health.record_failure(f"llm:{attempt_name}")
+            attempts_entry["error"] = f"initialization: {exc}"
+            last_retryable = exc.retryable
+            attempts.append(attempts_entry)
+            if not exc.retryable:
+                break
+            continue
+
+        attempt_started = time.perf_counter()
+        attempt_repaired = False
+        try:
             completion = await provider.complete(
-                repair_messages(messages, completion.text, sections),
-                temperature=0.0,
-                max_tokens=settings.llm.report_max_tokens,
+                messages,
+                temperature=settings_llm.report_temperature,
+                max_tokens=settings_llm.report_max_tokens,
                 json_mode=True,
             )
             try:
                 section_map = reconcile(parse_model_json(completion.text), sections)
-            except ValueError as parse_exc2:
-                raise ApiError(
-                    502,
-                    ErrorCode.PROVIDER_UNAVAILABLE,
-                    "model output still not valid JSON after one repair round-trip",
-                ) from parse_exc2
-    except ProviderError as exc:
-        app.state.provider_health.record_failure(f"llm:{decision.provider}")
-        metrics.incr(f"llm_errors:{decision.provider}")
+            except ValueError as parse_exc:  # malformed JSON / missing sections
+                if not settings_llm.repair_enabled:
+                    raise ApiError(
+                        502,
+                        ErrorCode.PROVIDER_UNAVAILABLE,
+                        f"model output was not valid JSON ({type(parse_exc).__name__}); "
+                        "repair disabled via MS_LLM__REPAIR_ENABLED",
+                    ) from parse_exc
+                attempt_repaired = True
+                completion = await provider.complete(
+                    repair_messages(messages, completion.text, sections),
+                    temperature=0.0,
+                    max_tokens=settings_llm.report_max_tokens,
+                    json_mode=True,
+                )
+                try:
+                    section_map = reconcile(parse_model_json(completion.text), sections)
+                except ValueError:
+                    output_error = "model output still not valid JSON after one repair round-trip"
+                    attempts_entry["error"] = output_error
+                    attempts.append(attempts_entry)
+                    continue  # next provider may format better
+        except ProviderError as exc:
+            app.state.provider_health.record_failure(f"llm:{attempt_name}")
+            metrics.incr(f"llm_errors:{attempt_name}")
+            attempts_entry["error"] = str(exc)[:300]
+            last_retryable = exc.retryable
+            attempts.append(attempts_entry)
+            if not exc.retryable:
+                break
+            output_error = f"draft generation failed: {exc}"
+            continue
+
+        used_provider = attempt_name
+        repaired = attempt_repaired
+        # transcript redacted for THIS provider is what fidelity checking must
+        # compare against (redaction is not fabrication)
+        grounded_against = transcript
+        metrics.incr("llm_attempts", 1)
+        metrics.observe_ms("llm_latency_ms", float((time.perf_counter() - attempt_started) * 1000))
+        break
+    else:
+        used_provider = None
+
+    if used_provider is None or completion is None:
+        primary_fail = attempts[0] if attempts else {"error": "no attempt recorded"}
         raise ApiError(
             502,
             ErrorCode.PROVIDER_UNAVAILABLE,
-            f"draft generation failed: {exc}",
-            details={"provider": decision.provider, "retryable": exc.retryable},
-        ) from exc
+            primary_fail.get("error", "draft generation failed")[:400],
+            details={
+                "provider": decision.provider,
+                "retryable": True if last_retryable is None else last_retryable,
+                "tried": attempts,
+            },
+        )
 
-    latency_ms = int((time.perf_counter() - started) * 1000)
-    fidelity = grounding_warnings(transcript, section_map)
+    latency_ms = int((time.perf_counter() - attempt_started) * 1000)
+    fidelity = grounding_warnings(grounded_against, section_map)
     usage = completion.usage
     title_by_id = {s.id: s.title for s in sections}
 
-    # token accounting → metrics (ai_requests table lands with Phase 7; the
-    # counters below are its future backfill source)
+    if used_provider != decision.provider:
+        # honest disclosure: a fallback answered, not the routed primary
+        fidelity.warnings.append(
+            {
+                "code": "provider_fallback",
+                "message": (
+                    f"'{decision.provider}' could not complete the task; "
+                    f"draft generated by fallback '{used_provider}'"
+                ),
+            }
+        )
+        metrics.incr("llm_fallbacks")
+
+    # token accounting → metrics + cost ledger (ai_requests table lands with
+    # Phase 7; counters/ledger below are its future backfill source)
     metrics.incr("llm_requests")
-    metrics.incr(f"llm_requests:{decision.provider}")
-    metrics.observe_ms("llm_latency_ms", float(latency_ms))
-    app.state.provider_health.record_success(f"llm:{decision.provider}", float(latency_ms))
+    metrics.incr(f"llm_requests:{used_provider}")
+    app.state.provider_health.record_success(f"llm:{used_provider}", float(latency_ms))
+    ledger = getattr(app.state, "cost_ledger", None)
     if usage is not None:
         for field_name, value in (
             ("prompt", usage.prompt_tokens),
@@ -165,16 +223,20 @@ async def create_draft(
             ("total", usage.total_tokens),
         ):
             if value:
-                metrics.incr(f"llm_tokens:{decision.provider}:{field_name}", int(value))
+                metrics.incr(f"llm_tokens:{used_provider}:{field_name}", int(value))
+        if ledger is not None and usage.total_tokens:
+            ledger.add_usage(used_provider, int(usage.total_tokens))
 
     app.state.audit.emit(
         "report_draft_generated",
         encounter_id=encounter_id,
         user_id=principal.user_id if principal else None,
-        provider=decision.provider,
+        provider=used_provider,
+        routed_provider=decision.provider,
         model=completion.model,
         routing_reason=decision.reason,
         privacy_override=decision.privacy_override_applied,
+        budget_soft_stop=decision.budget_soft_stop,
         phi_redaction=redact,
         repaired=repaired,
         section_count=len(sections),
@@ -187,7 +249,7 @@ async def create_draft(
     return ReportDraftResponse(
         draft_id=f"drw_{uuid.uuid4().hex[:16]}",
         encounter_id=encounter_id,
-        provider=decision.provider,
+        provider=used_provider,
         model=completion.model,
         routing_reason=decision.reason,
         privacy_override_applied=decision.privacy_override_applied,

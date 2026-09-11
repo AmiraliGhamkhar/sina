@@ -26,6 +26,8 @@ from api.config import Settings, get_settings
 from api.errors import install_error_handlers
 from api.routes import API_ROUTERS, ROOT_ROUTERS, WS_ROUTERS
 from api.services.audit import AuditLog
+from api.services.cost import CostLedger
+from api.services.health_mirror import HealthMirror
 from api.services.session_registry import SessionRegistry
 from api.services.transcript_store import TranscriptStore
 from api.telemetry import Metrics, setup_logging
@@ -52,7 +54,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "dev-mode server: docs enabled, auth may fall back to MS_AUTH__DEV_TOKEN; "
                 "never expose this port beyond localhost"
             )
+        try:
+            await app.state.health_mirror.start()  # no-op unless MS_REDIS__URL + interval set
+        except Exception:  # pragma: no cover - never block boot on coordination state
+            logger.warning("health mirror start failed; single-worker semantics apply", exc_info=True)
         yield
+        try:
+            await app.state.health_mirror.stop()
+        except Exception:  # pragma: no cover - shutdown path
+            logger.debug("health mirror stop failed", exc_info=True)
         try:
             await app.state.ai_registry.aclose_all()
         except Exception:  # pragma: no cover - best effort shutdown
@@ -73,6 +83,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.provider_health = HealthTracker(
         failure_threshold=settings.routing.failure_threshold,
         cooldown_s=settings.routing.health_cooldown_s,
+    )
+    app.state.cost_ledger = CostLedger(budget_tokens_per_day=settings.routing.budget_tokens_per_day)
+    app.state.health_mirror = HealthMirror(
+        tracker=app.state.provider_health,
+        metrics=app.state.metrics,
+        url=settings.redis.url or "",
+        interval_s=settings.routing.health_mirror_interval_s,
     )
     app.state.ai_registry = build_default_registry()
     app.state.transcript_store = TranscriptStore()

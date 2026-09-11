@@ -1,3 +1,16 @@
+/* Phase 5 CI hardening: the WPF markup-compile temp project on Linux drops
+   ImplicitUsings items, so this file lists them explicitly (duplicates from
+   the SDK's implicit set are warnings at worst; TreatWarningsAsErrors=false). */
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Text;
+using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
+
 // Medical editor: post-recording transcript cleanup + terminology
 // normalization + voice-command log. Backend services implement the logic
 // (Phases 3/6); the editor keeps the transcript model and the edit buffer.

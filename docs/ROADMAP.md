@@ -127,17 +127,34 @@ Done notes (deviations recorded honestly):
   (wire conformance is MockTransport-fixture verified); report storage,
   editing endpoints and finalize/approve land with P6/P7.
 
-## Phase 5 — Router hardening (next)
-- HealthTracker fed by real task outcomes (not just probes); Redis-backed
-  shared health + queue depth; latency EWMA per provider.
-- Runtime fallback: on `ProviderError(retryable)` → next in
-  `RouteDecision.fallbacks`, transparent to session (one `PROVIDER_FALLBACK`
-  warning frame); no-fallback path for batch tasks returns 502 with tried list.
-- Cost budget guard (per-day token budget, soft-stop → local-only).
-- Acceptance: fault-injection tests prove fallback never crosses the privacy
-  wall; health demotion observable via stats endpoint.
+## Phase 5 — Router hardening ✅ (this build)
+- HealthTracker is fed by real task outcomes: STT streams record per-provider
+  success/failure inside the hub (keyed `stt:{name}`), LLM drafts record
+  `llm:{name}` incl. latency; demotion = `failure_threshold` consecutive
+  failures with half-open cooldown. Ranking now uses a measured **latency EWMA**
+  (`LATENCY_EWMA_ALPHA=0.3`) that outranks the static per-provider hint.
+- Runtime fallback: a retryable `ProviderError` mid-session transparently
+  switches to the next name in `RouteDecision.fallbacks` — one
+  `PROVIDER_FALLBACK` warning frame per switch, session identity/URL/lock
+  untouched, transcripts continue in the same store. The chain is
+  privacy-filtered **at route() time**, so fallback can never cross the wall
+  (test-pinned). Batch tasks walk the same chain without transparency; total
+  failure = 502 with the full `tried[]` list. Kill switch:
+  `MS_ROUTING__FALLBACK_ENABLED=false`.
+- Cost budget guard: `MS_ROUTING__BUDGET_TOKENS_PER_DAY` (0 = off). On
+  exhaustion the router sets `cloud_excluded` — a soft stop to local-only;
+  `GET /api/v1/observability/stats` exposes `cost.{tokens_today, exhausted}`
+  and the whole `provider_health` snapshot.
+- Redis shared view (optional): `HealthMirror` publishes tracker snapshot +
+  aggregate audio-queue depth and hydrates from peers on startup
+  (`MS_REDIS__URL` + `MS_ROUTING__HEALTH_MIRROR_INTERVAL_S>0`). Lazy import —
+  no redis driver needed in single-worker dev/CI; every redis error degrades
+  to local-only, never a crash.
+- Not covered honestly: queue-depth is per-worker sum (no global max yet);
+  budget counters are in-process (restart resets the day; durable spend lives
+  with the P7 `ai_requests` table); `absorb` is an average, not CRDT-merged.
 
-## Phase 6 — Commands, templates, validation
+## Phase 6 — Commands, templates, validation (next)
 - Extensible command parser (`backend/api/services/voice_commands/`):
   registry of command handlers w/ bilingual triggers, exact/anchored match
   policy + "command mode" (only strips speech that couldn't be clinical

@@ -88,11 +88,6 @@ async def transcribe_batch(
         # never fall back past the privacy wall — surface the refusal
         raise ApiError(503, ErrorCode.NO_PROVIDER, str(exc)) from exc
 
-    stt = request.app.state.ai_registry.create(
-        ProviderKind.STT,
-        decision.provider,
-        settings.provider_config("stt", decision.provider),
-    )
     hints = tuple(h.strip() for h in (context_hints or "").split(",") if h.strip())
     stt_request = STTRequest(
         audio=pcm,
@@ -102,21 +97,59 @@ async def transcribe_batch(
         language=language,
         context_hints=hints,
     )
-    started = time.perf_counter()
-    try:
-        segments = await stt.transcribe(stt_request)
-    except ProviderError as exc:
-        status = exc.status_hint if exc.status_hint in (400, 401, 403, 404, 422) else 502
+
+    # Phase 5: batch tasks get NO mid-flight transparency (single request),
+    # but retryable provider failures may still walk the privacy-filtered
+    # fallback chain; total failure surfaces 502 with the full tried list.
+    chain = [decision.provider, *(decision.fallbacks if settings.routing.fallback_enabled else ())]
+    registry = request.app.state.ai_registry
+    segments = None
+    used_provider = decision.provider
+    attempts: list[dict] = []
+    failure: ProviderError | None = None
+    for attempt_name in chain:
+        entry: dict = {"provider": attempt_name}
+        try:
+            stt = registry.create(
+                ProviderKind.STT, attempt_name, settings.provider_config("stt", attempt_name)
+            )
+        except ProviderError as exc:
+            entry["error"] = f"initialization: {exc}"[:200]
+            attempts.append(entry)
+            failure = failure or exc
+            continue
+        try:
+            started = time.perf_counter()
+            segments = await stt.transcribe(stt_request)
+        except ProviderError as exc:
+            request.app.state.provider_health.record_failure(f"stt:{attempt_name}")
+            entry["error"] = str(exc)[:200]
+            attempts.append(entry)
+            failure = failure or exc
+            if exc.status_hint in (400, 401, 403, 404, 422) or not exc.retryable:
+                break  # client-side/misuse verdict — other providers won't fix it
+            continue
+        used_provider = attempt_name
+        break
+    if segments is None:
+        assert failure is not None
+        status = failure.status_hint if failure.status_hint in (400, 401, 403, 404, 422) else 502
         raise ApiError(
             status,
             ErrorCode.PROVIDER_UNAVAILABLE,
-            f"batch transcription failed: {exc}",
-            details={"provider": decision.provider, "retryable": exc.retryable},
-        ) from exc
+            f"batch transcription failed: {failure}",
+            details={
+                "provider": decision.provider,
+                "retryable": failure.retryable,
+                "tried": attempts,
+            },
+        )
+    if used_provider != decision.provider:
+        request.app.state.metrics.incr("stt_batch_fallbacks")
     latency_ms = int((time.perf_counter() - started) * 1000)
     request.app.state.metrics.observe_ms("stt_batch_latency_ms", float(latency_ms))
     request.app.state.metrics.incr("stt_batch_requests")
-    request.app.state.provider_health.record_success(f"stt:{decision.provider}", float(latency_ms))
+    request.app.state.provider_health.record_success(f"stt:{used_provider}", float(latency_ms))
 
     audio_duration_ms = len(pcm) * 1000 // (rate * channels * 2)
     payload = [
@@ -136,7 +169,8 @@ async def transcribe_batch(
         "transcribe_batch_completed",
         request_id=request_id,
         user_id=principal.user_id if principal else None,
-        provider=decision.provider,
+        provider=used_provider,
+        routed_provider=decision.provider,
         routing_reason=decision.reason,
         privacy_override=decision.privacy_override_applied,
         audio_bytes=len(raw),
@@ -146,7 +180,7 @@ async def transcribe_batch(
     )
     return TranscribeBatchResponse(
         request_id=request_id,
-        provider=decision.provider,
+        provider=used_provider,
         mode=route_request.mode.value,
         privacy_override_applied=decision.privacy_override_applied,
         language=language,

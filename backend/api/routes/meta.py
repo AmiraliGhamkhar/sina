@@ -62,4 +62,7 @@ async def stats(request: Request, principal: OptionalPrincipal) -> dict:
     """Process-local metrics snapshot (Prometheus endpoint: Phase 8)."""
     payload = request.app.state.metrics.snapshot()
     payload["ws_sessions"] = request.app.state.sessions.snapshot()
+    # Phase 5 acceptance: health demotion + budget state observable here
+    payload["provider_health"] = dict(request.app.state.provider_health.snapshot())
+    payload["cost"] = request.app.state.cost_ledger.snapshot()
     return payload

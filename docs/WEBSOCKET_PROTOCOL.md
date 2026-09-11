@@ -117,7 +117,11 @@ Notes:
 - Provider fallback mid-session emits `warning` `code=PROVIDER_FALLBACK` with
   `details: {from, to}` and a following `session.started`-style
   `provider` field update inside `warning.details` only — session identity
-  never changes.
+  never changes.  Phase 5 note: the fallback chain comes from the router and is privacy-filtered at
+  selection time, so a `privacy_required` session can never fall back past the
+  wall; audio already dequeued by the dying provider is lost with it (the new
+  provider resumes from the shared queue). Exactly one warning per switch.
+
 
 ## Phase status (honesty ledger)
 

@@ -1,3 +1,17 @@
+/* Phase 5 CI hardening: the WPF markup-compile temp project on Linux drops
+   ImplicitUsings items, so this file lists them explicitly (duplicates from
+   the SDK's implicit set are warnings at worst; TreatWarningsAsErrors=false). */
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Text;
+using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Net.WebSockets;
+
 // Audio capture contracts.
 // Interface-first (spec §19.4): the recorder UI binds to these abstractions;
 // the NAudio/WASAPI implementation lands in Phase 2, adapted from SpeakType

@@ -44,6 +44,10 @@ class RouteRequest:
     #: an override, not a hint: it forces PrivacyClass.LOCAL regardless of
     #: ``mode`` or ``preferred``.
     privacy_required: bool = False
+    #: Phase 5 cost-budget guard: when the daily token budget is exhausted the
+    #: backend soft-stops — cloud candidates are excluded entirely (a hard
+    #: constraint like privacy), local providers keep serving.
+    cloud_excluded: bool = False
     #: provider name explicitly requested by the user/API; must exist in the
     #: candidate set or ``strict_preference`` decides whether we error out.
     preferred: str | None = None
@@ -64,6 +68,9 @@ class ProviderCandidate:
     supports_batch: bool = True
     languages: tuple[str, ...] = ("*",)
     latency_hint_ms: int = 500
+    #: Phase 5: observed EWMA latency from the shared HealthTracker; when set
+    #: it outranks the static hint.
+    latency_ms: float | None = None
     cost_hint_per_unit: float = 0.0
 
 
@@ -71,10 +78,14 @@ class ProviderCandidate:
 class RouteDecision:
     provider: str
     kind: ProviderKind
-    #: ordered provider names to try if the primary fails at runtime
+    #: ordered provider names to try if the primary fails at runtime (Phase 5:
+    #: consumed by the transcription hub / batch+draft routes, never crosses
+    #: the privacy wall because candidates were already privacy-filtered)
     fallbacks: tuple[str, ...] = ()
     reason: str = ""
     privacy_override_applied: bool = False
+    #: True when the daily token budget forced local-only routing (soft stop)
+    budget_soft_stop: bool = False
     #: full ordered candidate names, recorded for auditing
     considered: tuple[str, ...] = ()
 
@@ -86,9 +97,10 @@ class RoutingError(Exception):
 class NoEligibleProviderError(RoutingError):
     def __init__(self, request: RouteRequest, considered: Sequence[ProviderCandidate]) -> None:
         names = ", ".join(c.name for c in considered) or "<none registered>"
+        budget = ", budget_soft_stop" if request.cloud_excluded else ""
         super().__init__(
             f"no eligible provider for task '{request.task.value}' "
-            f"(mode={request.mode.value}, privacy={request.privacy_required}); "
+            f"(mode={request.mode.value}, privacy={request.privacy_required}{budget}); "
             f"candidates considered: {names}"
         )
 
@@ -116,6 +128,13 @@ def _privacy_allowed(candidate: ProviderCandidate, request: RouteRequest) -> boo
     return True
 
 
+def _budget_allowed(candidate: ProviderCandidate, request: RouteRequest) -> bool:
+    """Cost-budget soft stop: cloud providers drop out, local keeps serving."""
+    if request.cloud_excluded:
+        return candidate.privacy is PrivacyClass.LOCAL
+    return True
+
+
 def _mode_allowed(candidate: ProviderCandidate, request: RouteRequest) -> bool:
     if request.mode is RoutingMode.LOCAL:
         return candidate.privacy is PrivacyClass.LOCAL
@@ -131,7 +150,7 @@ def _rank_key(candidate: ProviderCandidate, request: RouteRequest) -> tuple:
     return (
         0 if candidate.healthy else 1,  # health dominates
         privacy_pref,  # local-first by default; privacy also forces this
-        candidate.latency_hint_ms,
+        candidate.latency_ms if candidate.latency_ms is not None else candidate.latency_hint_ms,
         candidate.cost_hint_per_unit,
         candidate.name,  # stable tie-break
     )
@@ -154,11 +173,15 @@ def route(
     eligible = [
         c
         for c in candidates
-        if _capable(c, request) and _privacy_allowed(c, request) and _mode_ok(c)
+        if _capable(c, request)
+        and _privacy_allowed(c, request)
+        and _budget_allowed(c, request)
+        and _mode_ok(c)
     ]
     privacy_override = request.privacy_required and request.mode not in (
         RoutingMode.LOCAL,
     )
+    budget_soft_stop = request.cloud_excluded
 
     # 2. explicit preference wins if it survives the eligibility filters
     if request.preferred:
@@ -174,6 +197,7 @@ def route(
                 fallbacks=tuple(c.name for c in rest),
                 reason=f"explicit preference '{match.name}'",
                 privacy_override_applied=privacy_override,
+                budget_soft_stop=budget_soft_stop,
                 considered=tuple(c.name for c in eligible),
             )
         if request.strict_preference:
@@ -191,6 +215,8 @@ def route(
     reason_bits = [f"mode={request.mode.value}"]
     if privacy_override:
         reason_bits.append("privacy override → local only")
+    if budget_soft_stop:
+        reason_bits.append("token budget exhausted → local only (soft stop)")
     if request.preferred:
         reason_bits.append(f"preferred '{request.preferred}' unavailable")
     return RouteDecision(
@@ -199,5 +225,6 @@ def route(
         fallbacks=tuple(c.name for c in rest),
         reason="; ".join(reason_bits),
         privacy_override_applied=privacy_override,
+        budget_soft_stop=budget_soft_stop,
         considered=tuple(c.name for c in ordered),
     )

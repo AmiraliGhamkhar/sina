@@ -21,6 +21,7 @@ import anyio
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import ValidationError
 
+from ai.base import ProviderKind
 from ai.router import NoEligibleProviderError
 from api.auth.deps import websocket_principal
 from api.errors import ErrorCode, ws_error_frame
@@ -205,6 +206,9 @@ async def _handshake(
         provider=decision.provider,
         language=start.language,
     )
+    # Phase 5 runtime fallback: the hub may transparently switch to the
+    # router's fallback names (already privacy-filtered by route()) if the
+    # primary stream dies with a retryable error mid-session.
     hub = TranscriptionHub(
         provider=provider,
         session_id=session.session_id,
@@ -216,6 +220,10 @@ async def _handshake(
         pause_buffer_ms=settings.websocket.pause_buffer_ms,
         sample_rate=sample_rate,
         channels=channels,
+        fallback_chain=list(decision.fallbacks) if settings.routing.fallback_enabled else [],
+        provider_factory=lambda name: websocket.app.state.ai_registry.create(
+            ProviderKind.STT, name, settings.provider_config("stt", name)
+        ),
     )
     # started frame first, pump second: deterministic ordering of the first
     # control frame vs provider transcript frames (no race on session.started)
@@ -314,14 +322,9 @@ async def _media_loop(
                 duration_ms = int((last_audio_at - session.created_at) * 1000)
                 websocket.app.state.transcript_store.close(session.session_id)
                 metrics.incr("stt_streams_stopped")
-                await send_frame(
-                    SessionCompleted(
-                        session_id=session.session_id,
-                        segment_count=session.segments_final,
-                        duration_ms=duration_ms,
-                        provider=session.provider,
-                    ).model_dump(mode="json")
-                )
+                # audit BEFORE the completed frame: once the client sees it, it
+                # may drop the socket — and an audit trail that races with
+                # transport teardown is not an audit trail
                 websocket.app.state.audit.emit(
                     "session_stopped",
                     session_id=session.session_id,
@@ -330,6 +333,14 @@ async def _media_loop(
                     dropped_audio_seconds=stats["dropped_audio_seconds"],
                     stream_failed=stats["stream_failed"],
                     duration_ms=duration_ms,
+                )
+                await send_frame(
+                    SessionCompleted(
+                        session_id=session.session_id,
+                        segment_count=session.segments_final,
+                        duration_ms=duration_ms,
+                        provider=session.provider,
+                    ).model_dump(mode="json")
                 )
                 return
             new_state = "paused" if ctl.type == "session.pause" else "recording"

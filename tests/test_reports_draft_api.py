@@ -135,15 +135,24 @@ def test_draft_repairs_invalid_json_once(client):
 
 
 def test_draft_fails_after_second_invalid_json(client):
+    # Phase 5: with the fallback chain ON, a healthy provider would simply
+    # answer — this test pins the single-provider "502 after one repair"
+    # contract, so exercise it with fallback explicitly disabled.
+    client.app.state.settings.routing.fallback_enabled = False
     fake = _ScriptedLlm(["junk one", "junk two"])
     _register_llm(client, "alwaysbad", fake)
     resp = _post_draft(client, provider="alwaysbad")
     assert resp.status_code == 502
-    assert "repair" in resp.json()["error"]["message"]
+    err = resp.json()["error"]
+    assert "repair" in err["message"]
+    assert err["details"]["tried"] == [
+        {"provider": "alwaysbad", "error": "model output still not valid JSON after one repair round-trip"}
+    ]
     assert fake.calls == 2
 
 
 def test_draft_provider_outage_maps_502_with_retry_hint(client):
+    client.app.state.settings.routing.fallback_enabled = False
     fake = _ScriptedLlm([None])
     _register_llm(client, "outage", fake)
     resp = _post_draft(client, provider="outage")
@@ -151,6 +160,24 @@ def test_draft_provider_outage_maps_502_with_retry_hint(client):
     err = resp.json()["error"]
     assert err["code"] == "PROVIDER_UNAVAILABLE"
     assert err["details"]["retryable"] is True
+    assert err["details"]["tried"][0]["provider"] == "outage"
+
+
+def test_draft_runtime_fallback_rescues_outage_via_chain(client):
+    """Phase 5 acceptance: retryable failure transparently walks to the next
+    routed provider; response says WHO answered and why."""
+    fake = _ScriptedLlm([None])  # retryable outage, never produces output
+    _register_llm(client, "flakyllm", fake)
+    resp = _post_draft(client, provider="flakyllm")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["provider"] == "mock"  # the fallback answered
+    assert any(w["code"] == "provider_fallback" for w in body["warnings"])
+    assert "flakyllm" in next(w["message"] for w in body["warnings"] if w["code"] == "provider_fallback")
+    stats = client.get("/api/v1/observability/stats").json()
+    assert stats["cost"]["tokens_today"] > 0  # mock's usage still metered
+    assert "llm:flakyllm" in stats["provider_health"]
+    assert stats["provider_health"]["llm:flakyllm"]["total_failures"] >= 1
 
 
 def test_cloud_provider_gets_redacted_transcript_and_privacy_wall_holds(client):

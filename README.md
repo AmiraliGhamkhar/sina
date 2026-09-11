@@ -63,7 +63,7 @@ credentials arrive in Phase 7; the server answers 501 + a stable
 | 2 | NAudio capture → WS audio → mock STT stream → live transcript (+ session transcript GET/PATCH) | ✅ done (this build) |
 | 3 | STT adapters: local whisper-server, qwen-asr, Speechmatics, Deepgram (stream+batch) + batch REST endpoint | ✅ done (this build) |
 | 4 | LLM adapters: llama-server + props, OpenAI/Anthropic/Gemini, grounded draft endpoint | ✅ done (this build) |
-| 5 | Router: live health/latency/queue-depth, fallback chains (pure core + tracker shipped in P1) | partial |
+| 5 | Router hardening: health fed by task outcomes, latency EWMA ranking, runtime fallback chains (WS + batch + draft), daily token budget soft-stop, optional Redis health mirror | ✅ done (this build) |
 | 6 | Voice commands, terminology, templates, report generation, validation warnings | planned (command catalog served by manifest) |
 | 7 | PostgreSQL + SQLAlchemy + Alembic, JWT/refresh/argon2, Redis rate-limit, audit table, encrypted provider rows | planned (URL normalizer, JWT codec, JSONL audit shipped in P1) |
 | 8 | Prometheus/OTel, load tests, MSIX packaging, production hardening | planned |
@@ -102,10 +102,11 @@ credentials arrive in Phase 7; the server answers 501 + a stable
 ## Known gaps (honesty ledger)
 
 1. WPF client + `MedicalScribe.WPF.Tests` cannot be compiled in this Linux
-   sandbox (no .NET SDK; network policy blocks installs) — code targets
-   net10.0-windows and must be built on Windows CI; XAML/ViewModel bindings
-   and the NAudio capture loop are unverified there. First CI task:
-   `dotnet build client/MedicalScribe.sln && dotnet test`.
+   sandbox (no .NET SDK; network policy blocks installs) — the CI pipeline is
+   the compiler: `client-linux` runs the full WPF build against the targeting
+   pack and `client-windows` runs it natively with xunit. Runtime behavior
+   (window chrome, hotkeys, NAudio device handling) still needs a human pass
+   on a Windows machine.
 2. The live transcript store is an in-memory LRU (last 200 ended sessions);
    server restart loses transcripts and encounter linkage/Persistence land in
    Phase 7. Logout still has no revocation store.
@@ -119,9 +120,9 @@ credentials arrive in Phase 7; the server answers 501 + a stable
 5. Report drafts are stateless (client-held): server-side draft storage,
    section PATCH and finalize/approve land in Phase 6/7. `ai_requests` usage
    rows are backfilled by the Phase 7 DB (counters carry it meanwhile).
-5. Cloud LLM adapters (Phase 4) and the router's live latency/queue
-   signals (Phase 5) are interface-ready but unimplemented.
-6. Voice-command *parsing* (Phase 6) — the catalog + protocol frames exist,
+5. Voice-command *parsing* (Phase 6) — the catalog + protocol frames exist,
    recognition is stubbed server-side.
+6. Cost-budget counters are in-process (a restart resets the day); durable
+   usage rows land with the Phase 7 database.
 7. Observability is process-local counters; Prometheus/OTel endpoints land in
    Phase 8.

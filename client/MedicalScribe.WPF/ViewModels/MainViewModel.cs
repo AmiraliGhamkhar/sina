@@ -1,3 +1,16 @@
+/* Phase 5 CI hardening: the WPF markup-compile temp project on Linux drops
+   ImplicitUsings items, so this file lists them explicitly (duplicates from
+   the SDK's implicit set are warnings at worst; TreatWarningsAsErrors=false). */
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Text;
+using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
+
 // Shell state: auth gate, navigation, connection banner, global hotkeys.
 // All business logic lives in Services/ViewModels — MainWindow code-behind
 // only hands the HWND to the hotkey service (pure plumbing).

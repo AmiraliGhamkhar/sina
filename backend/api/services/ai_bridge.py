@@ -32,11 +32,21 @@ if TYPE_CHECKING:
     from ai.base import STTProvider
 
 
+def budget_exhausted(app) -> bool:
+    """Cost-ledger soft stop signal (Phase 5). Missing ledger (tests, shells)
+    simply means "no budget configured"."""
+    ledger = getattr(app.state, "cost_ledger", None)
+    return bool(ledger is not None and ledger.exhausted)
+
+
 def build_candidates(app, kind: ProviderKind) -> list[ProviderCandidate]:
-    """Flatten registry descriptors into pure routing candidates."""
+    """Flatten registry descriptors into pure routing candidates, enriched
+    with live health + observed EWMA latency (tracker keys are
+    ``"{kind}:{provider}"``)."""
     settings = app.state.settings
     registry = app.state.ai_registry
     health = app.state.provider_health
+    latencies = health.latency_map() if hasattr(health, "latency_map") else {}
     candidates: list[ProviderCandidate] = []
     for d in registry.descriptors(kind):
         configured = registry.is_configured(kind, d.name, settings.provider_config(kind.value, d.name))
@@ -52,6 +62,7 @@ def build_candidates(app, kind: ProviderKind) -> list[ProviderCandidate]:
                 supports_batch=d.capabilities.supports_batch,
                 languages=d.capabilities.languages,
                 latency_hint_ms=d.capabilities.latency_hint_ms,
+                latency_ms=latencies.get(f"{kind.value}:{d.name}"),
                 cost_hint_per_unit=d.capabilities.cost_hint_per_unit,
             )
         )
@@ -68,6 +79,7 @@ def stt_route_request(app, start: SessionStart) -> RouteRequest:
         kind=ProviderKind.STT,
         mode=mode,
         privacy_required=bool(privacy),
+        cloud_excluded=budget_exhausted(app),
         preferred=start.provider,
         strict_preference=False,  # a busy cloud pick may fall back; health does the rest
         language=start.language,
@@ -94,6 +106,7 @@ def batch_route_request(
         kind=ProviderKind.STT,
         mode=resolved_mode,
         privacy_required=bool(privacy),
+        cloud_excluded=budget_exhausted(app),
         preferred=provider,
         strict_preference=False,
         language=language,
@@ -119,6 +132,7 @@ def llm_route_request(
         kind=ProviderKind.LLM,
         mode=resolved_mode,
         privacy_required=bool(privacy),
+        cloud_excluded=budget_exhausted(app),
         preferred=provider or settings.llm.default_provider,
         strict_preference=False,
         language=None,

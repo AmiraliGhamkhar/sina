@@ -177,6 +177,13 @@ class RoutingConfig(BaseModel):
     #: provider failure count before temporary demotion (ai.router.health)
     failure_threshold: int = 3
     health_cooldown_s: float = 30.0
+    #: Phase 5 — transparent runtime fallback over RouteDecision.fallbacks
+    fallback_enabled: bool = True
+    #: Phase 5 — daily LLM token budget; 0 disables the guard. Exhaustion
+    #: soft-stops cloud providers (local keeps working), see services/cost.py
+    budget_tokens_per_day: int = 0
+    #: Phase 5 — Redis health-mirror publish interval (0 disables mirroring)
+    health_mirror_interval_s: float = 0.0
 
 
 class WebsocketConfig(BaseModel):
