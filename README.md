@@ -1,17 +1,242 @@
 # MedicalScribe
 
-Windows medical speech-to-text + AI clinical documentation platform.
-Physicians dictate (Persian, English, or mixed fa/en); WPF streams audio to a
-FastAPI backend; a privacy-aware AI router runs server-side STT and LLM
-providers; generated notes are **drafts that a clinician must review, edit,
-finalize and approve** — AI output is never automatically a medical record.
+Windows medical speech-to-text + AI clinical documentation platform. Physicians
+dictate (Persian, English, or mixed fa/en); a WPF desktop app streams audio to a
+FastAPI backend; a privacy-aware AI router picks server-side STT and LLM
+providers. Generated notes are **drafts a clinician must review, edit, finalize
+and approve** — AI output is never automatically a medical record.
 
 ```
-WPF client ──HTTPS/WS──► FastAPI ──► AI Router ──► STT providers (whisper/qwen/speechmatics/deepgram/mock)
-   (no provider access,          │                └► LLM providers  (llama-server/openai/anthropic/gemini/mock)
-    no secrets here)             ├─ PostgreSQL (system of record) · Redis (queues/limits/shared state)
-                                 └─ audit log + metrics (never raw transcripts by default)
+WPF client ──HTTPS/WS──► FastAPI ──► AI Router ──► STT: whisper / qwen / speechmatics / deepgram / mock
+ (no provider access,          │                └► LLM: llama-server / openai / anthropic / gemini / mock
+  no secrets here)             ├─ PostgreSQL (system of record) · Redis (queues, limits, shared state)
+                               └─ audit log + metrics (never raw transcripts by default)
 ```
+
+Everything below is written for **Windows 11 + PowerShell**. Linux/macOS notes
+are at the end.
+
+---
+
+## 1. What you need
+
+| Tool | Why | Install |
+|---|---|---|
+| **Python 3.11+** (3.12 recommended) | backend + AI layer | [python.org/downloads](https://www.python.org/downloads/) — tick **"Add python.exe to PATH"** during setup |
+| **.NET 10 SDK** | only for the WPF desktop client | [dotnet.microsoft.com/download](https://dotnet.microsoft.com/download/dotnet/10.0) |
+| **Git** | clone the repo | [git-scm.com](https://git-scm.com/download/win) |
+| **Docker Desktop** *(optional)* | run the whole stack with batteries included | [docker.com](https://www.docker.com/products/docker-desktop/) |
+
+You do **not** need Postgres, Redis, or a GPU to start: the dev default runs
+fully in-memory with a mock speech engine.
+
+Check everything in a new PowerShell window:
+
+```powershell
+python --version      # or: py --version
+git --version
+dotnet --list-sdks    # only if you plan to run the desktop client
+```
+
+## 2. Get the code
+
+```powershell
+git clone https://github.com/AmiraliGhamkhar/sina.git
+cd sina
+```
+
+## 3. Run the backend (5 minutes)
+
+Copy each block into PowerShell, in order.
+
+**a. Create a virtual environment**
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+```
+
+> If PowerShell blocks the script with *"running scripts is disabled on this
+> system"*, run this once in the same window and try again:
+> ```powershell
+> Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+> ```
+
+**b. Install dependencies**
+
+```powershell
+python -m pip install --upgrade pip
+pip install -e ".[dev,db,cache,security]"
+```
+
+**c. Create your settings file**
+
+```powershell
+Copy-Item .env.example .env
+notepad .env
+```
+
+In `.env` set these two values (leave everything else as-is):
+
+```ini
+MS_AUTH__JWT_SECRET=<any long random string>
+MS_AUTH__DEV_TOKEN=dev-local-token
+```
+
+Generate a random secret straight from PowerShell if you prefer:
+
+```powershell
+[Convert]::ToBase64String((1..48 | ForEach-Object { Get-Random -Maximum 256 }))
+```
+
+**d. Start the API**
+
+```powershell
+python -m uvicorn api.main:app --app-dir backend --host 127.0.0.1 --port 8000 --reload
+```
+
+Leave this window running. You should see
+`MedicalScribe API v0.1.0 (phase 8) starting env=dev`. Stop it later with
+**Ctrl+C**. In any *new* PowerShell window, re-activate the venv first with
+`.\.venv\Scripts\Activate.ps1`.
+
+**e. Verify it (new PowerShell window)**
+
+```powershell
+Invoke-RestMethod http://localhost:8000/health
+# status version phase
+# ------ ------- -----
+# ok     0.1.0   8
+
+Invoke-RestMethod http://localhost:8000/api/v1/providers
+```
+
+Interactive API docs: **<http://localhost:8000/docs>**
+
+That is a working backend. Log in with the dev account — username `dev`,
+password = whatever you put in `MS_AUTH__DEV_TOKEN`:
+
+```powershell
+Invoke-RestMethod -Method Post http://localhost:8000/api/v1/auth/login `
+  -ContentType "application/json" `
+  -Body '{"username":"dev","password":"dev-local-token"}'
+```
+
+Prefer `curl`? On Windows PowerShell `curl` is an alias for `Invoke-WebRequest` —
+use **`curl.exe`** for the real thing:
+
+```powershell
+curl.exe http://localhost:8000/health
+```
+
+## 4. Run the desktop client (WPF)
+
+With the backend still running, open a second PowerShell window:
+
+```powershell
+cd sina\client
+dotnet build MedicalScribe.sln
+dotnet run --project MedicalScribe.WPF
+```
+
+* First launch shows a short first-run wizard (server URL, microphone, hotkey).
+* Server URL defaults to `http://localhost:8000`; change it in the app's
+  settings screen, or edit `%APPDATA%\MedicalScribe\settings.json`.
+* Default dictation hotkey: **Ctrl+Alt+Space**. Allow the Windows Firewall
+  prompt on *private networks* if it appears.
+* Log in as `dev` with your `MS_AUTH__DEV_TOKEN` value, then dictate — the mock
+  STT provider produces a live transcript with no AI models installed.
+
+## 5. Run the tests
+
+```powershell
+python -m pytest                                        # 277 tests
+python -m ruff check ai backend tests                   # lint
+```
+
+> Tests force in-memory mode. If you un-commented `MS_DATABASE__URL` in `.env`
+> but Postgres isn't running, tests fail with connection errors — comment the
+> line back out or start Postgres (`docker compose up -d postgres`).
+
+## 6. Or: run everything with Docker
+
+Easiest path to a full stack (API + Postgres + Redis) — no Python install needed:
+
+```powershell
+Copy-Item .env.example .env      # edit MS_AUTH__JWT_SECRET like in step 3c
+docker compose up --build        # add: --profile monitoring  for Prometheus + Grafana
+                                 # add: --profile llm         for a local llama-server (needs models\model.gguf)
+```
+
+The API is then on <http://localhost:8000> — `docker compose logs -f api` to
+watch it, `docker compose down` to stop.
+
+## 7. Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| `Activate.ps1 cannot be loaded because running scripts is disabled` | `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass` in that window, then activate again |
+| `python : The term 'python' is not recognized` | Reinstall Python with "Add python.exe to PATH" ticked, or use `py` instead of `python`, or call `.\.venv\Scripts\python.exe` directly |
+| Login returns `501 AUTH_NOT_IMPLEMENTED` | You're logging in with a real username/password but no database is configured. Use `dev` + your `MS_AUTH__DEV_TOKEN`, or enable Postgres (section 8) |
+| Login returns `401`, dev login refuses | `MS_AUTH__JWT_SECRET` and/or `MS_AUTH__DEV_TOKEN` are empty in `.env` — set both, restart the API |
+| `Bind for 0.0.0.0:8000 failed: port is already allocated` | Something already uses 8000: `netstat -ano \| findstr :8000`, then `taskkill /PID <pid> /F` — or start with `--port 8001` (and point the client at it) |
+| Warnings about Postgres/Redis connection refused at startup | Expected in dev — those features are off and the app degrades honestly. Ignore, or run `docker compose up -d postgres redis` |
+| `error: Microsoft Visual C++ 14.0 or greater is required` during `pip install` | Use 64-bit Python 3.12+, where all dependencies ship prebuilt wheels; or just use Docker (section 6) |
+| `dotnet : The term 'dotnet' is not recognized` | Install the .NET 10 SDK, then reopen PowerShell |
+| WPF window never connects | Backend must be running and the client's Server URL must match (`http://localhost:8000`) |
+| Firewall prompt on first run | Allow on private networks, or keep the API bound to `127.0.0.1` |
+
+## 8. Next steps (optional)
+
+**Durable mode (Postgres + Redis)** — real users, patients, encounters, audit
+rows. Un-comment in `.env` and restart:
+
+```ini
+MS_DATABASE__URL=postgresql+asyncpg://medicalscribe:medicalscribe@localhost:5432/medicalscribe
+MS_DATABASE__AUTO_CREATE=true
+MS_REDIS__URL=redis://localhost:6379/0
+MS_AUTH__BOOTSTRAP_ADMIN_PASSWORD=<first-admin-password>
+```
+
+Then `docker compose up -d postgres redis`, start the API once (it creates the
+schema and the admin user), and log in with the admin account to create staff
+via `POST /api/v1/admin/users`.
+
+**Real AI providers** — all optional, all server-side:
+
+* Local speech: set `MS_STT__WHISPER_SERVER__URL` (whisper.cpp server) and
+  `MS_STT__DEFAULT_PROVIDER=whisper-local`.
+* Local LLM: run llama.cpp's server, set `MS_LLM__LLAMA_SERVER__BASE_URL`
+  (e.g. `http://127.0.0.1:8080`), or use `docker compose --profile llm up`
+  with a `.gguf` file in `models/`.
+* Cloud STT/LLM: put API keys in `MS_STT__DEEPGRAM__API_KEY`,
+  `MS_LLM__CLOUD__OPENAI_API_KEY`, … — or store them encrypted through the
+  admin API. Check what's live with
+  `Invoke-RestMethod "http://localhost:8000/api/v1/providers?probe=health"`.
+
+### Everyday commands
+
+| Task | Command |
+|---|---|
+| Start API (dev, auto-reload) | `python -m uvicorn api.main:app --app-dir backend --host 127.0.0.1 --port 8000 --reload` |
+| Start API (LAN/clinic box) | `python -m uvicorn api.main:app --app-dir backend --host 0.0.0.0 --port 8000` |
+| Run tests / lint | `python -m pytest` · `python -m ruff check ai backend tests` |
+| Build client | `cd client; dotnet build MedicalScribe.sln` |
+| Run client | `dotnet run --project MedicalScribe.WPF` |
+| Docker stack | `docker compose up --build` · `docker compose down` |
+| Health / providers | `curl.exe http://localhost:8000/health` · `curl.exe "http://localhost:8000/api/v1/providers?probe=health"` |
+
+### Linux / macOS
+
+Identical flow; swap the two Windows-specific steps:
+
+```bash
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev,db,cache,security]" && cp .env.example .env
+.venv/bin/python -m uvicorn api.main:app --app-dir backend --port 8000
+```
+
+---
 
 ## Repository layout
 
@@ -19,140 +244,52 @@ WPF client ──HTTPS/WS──► FastAPI ──► AI Router ──► STT pro
 client/MedicalScribe.WPF/    WPF shell: Views/ViewModels/Audio/Hotkeys/Settings/Infrastructure
 backend/api/                 FastAPI: routes schemas models repositories services auth db
 ai/                          provider layer: base.py ABCs · registry · router/ · stt/ · llm/
-infrastructure/              Dockerfile.api · nginx (TLS+WS) · prometheus
+infrastructure/              Dockerfile.api · nginx (TLS+WS) · prometheus · load tests
 docs/                        ARCHITECTURE · ASSESSMENT · API · WEBSOCKET_PROTOCOL · SOURCE_MAP · …
 tests/                       pytest suite (backend + ai layer, protocol conformance)
 models/ third_party/         model weights (never committed) / vendored third-party code
 docker-compose.yml .env.example
 ```
 
-## Quick start (dev)
-
-Backend (Linux/macOS/Windows, Python 3.11+; production images use 3.12+):
-
-```bash
-python -m venv .venv && .venv/bin/pip install -e ".[dev,db,cache,security]"
-cp .env.example .env                     # dev mode needs no database; durable mode: set MS_DATABASE__URL
-.venv/bin/python -m pytest               # 265 tests: + auth, persistence, vault, rate limiting
-.venv/bin/python -m uvicorn api.main:app --app-dir backend --port 8000
-curl localhost:8000/health
-curl "localhost:8000/api/v1/providers?probe=health"
-```
-
-Durable mode (Postgres) without Docker: set `MS_DATABASE__URL`, create the
-schema once with `MS_DATABASE__AUTO_CREATE=true` (dev) or
-`cd backend && MS_DATABASE__URL=... alembic upgrade head` (production), then
-set `MS_AUTH__BOOTSTRAP_ADMIN_PASSWORD` for the first boot to create the
-admin user.
-
-Docker: `docker compose up` (api + Postgres + Redis; `--profile llm` adds an
-example llama-server container; it stays an external service — the app never
-embeds llama.cpp).
-
-WPF client (Windows, .NET 10 SDK):
-
-```powershell
-cd client
-dotnet build MedicalScribe.sln
-dotnet run --project MedicalScribe.WPF     # server URL is a User-Setting (stored in %APPDATA%\MedicalScribe\settings.json)
-```
-
-Login: real credentials against the users table (Phase 7; requires
-`MS_DATABASE__URL` — bootstrap the admin with
-`MS_AUTH__BOOTSTRAP_ADMIN_PASSWORD`, then create users via
-`POST /api/v1/admin/users`). Without a database, dev builds still accept
-user `dev` / the `MS_AUTH__DEV_TOKEN` value; credential login answers
-501 + a stable `AUTH_NOT_IMPLEMENTED` code and the client shows that
-honestly.
-
 ## Phase status
 
 | Phase | Scope | Status |
 |---|---|---|
-| 1 | References → assessment → WPF shell → FastAPI shell → REST connectivity (+ WS **control plane**, provider contracts, compose/nginx/env) | ✅ done (this build) |
-| 2 | NAudio capture → WS audio → mock STT stream → live transcript (+ session transcript GET/PATCH) | ✅ done (this build) |
-| 3 | STT adapters: local whisper-server, qwen-asr, Speechmatics, Deepgram (stream+batch) + batch REST endpoint | ✅ done (this build) |
-| 4 | LLM adapters: llama-server + props, OpenAI/Anthropic/Gemini, grounded draft endpoint | ✅ done (this build) |
-| 5 | Router hardening: health fed by task outcomes, latency EWMA ranking, runtime fallback chains (WS + batch + draft), daily token budget soft-stop, optional Redis health mirror | ✅ done |
-| 6 | Voice commands (parser+effects+undo), bilingual terminology, data-driven templates + LLM extraction, report lifecycle (draft→finalized→approved with acknowledged warnings), full clinical validation (doses/units/laterality/negation/dates/identifiers/anatomy) | ✅ done (this build) |
-| 7 | PostgreSQL + SQLAlchemy + Alembic (14 tables, write-through + restart reload), JWT + one-time refresh rotation (reuse ⇒ revoke all), argon2 login w/ lockout, Redis-or-in-process rate limiting (degrade-open) + per-user WS cap, Fernet-encrypted provider secrets, audit dual-write + admin API, patients/encounters | ✅ done (this build) |
-| 8 | Prometheus `/metrics` (dependency-free) + optional OTel, Grafana dashboard, WS heartbeat keepalive, durable cost-budget backfill, CI on real Postgres/Redis + pip-audit + gitleaks, WS load-test harness (20 sessions verified), first-run wizard, MSIX templates + release/security runbooks | ✅ done (mock-path load numbers; MSIX signing is a documented Windows step — see honesty ledger) |
+| 1 | References → assessment → WPF shell → FastAPI shell → REST connectivity (+ WS control plane, provider contracts, compose/nginx/env) | ✅ |
+| 2 | NAudio capture → WS audio → mock STT stream → live transcript | ✅ |
+| 3 | STT adapters: whisper-server, qwen-asr, Speechmatics, Deepgram (stream + batch) + batch REST endpoint | ✅ |
+| 4 | LLM adapters: llama-server, OpenAI/Anthropic/Gemini, grounded draft endpoint | ✅ |
+| 5 | Router hardening: health from task outcomes, EWMA latency ranking, fallback chains, daily token budget, Redis health mirror | ✅ |
+| 6 | Voice commands, bilingual terminology, templates, report lifecycle (draft→finalized→approved), full clinical validation | ✅ |
+| 7 | PostgreSQL + Alembic (14 tables), JWT + refresh rotation, argon2 login + lockout, rate limiting, encrypted provider secrets, audit + admin API | ✅ |
+| 8 | Prometheus `/metrics`, Grafana dashboard, WS heartbeat, CI on real Postgres/Redis, load-test harness, first-run wizard, MSIX templates | ✅ |
 
 ## Non-negotiables encoded in this codebase
 
 - **Privacy wall**: `privacy_required` encounters route to LOCAL providers only —
   even under `mode=cloud` or an explicit cloud preference (tested).
-- **Grounding**: prompt contract + validation service compare draft vs
-  transcript for numbers/doses/units/laterality/negation/dates/identifiers
-  (bilingual units, Jalali↔Gregorian dates, near-miss dose detection);
-  mismatches produce severity-tagged clinician-review warnings, never silent
-  edits. `10 mg`→`100 mg`, `right`→`left`, `no effusion`→`effusion` are all
-  pinned critical by the test pack.
-- **Two-step sign-off**: draft → finalized → approved only via explicit
-  clinician actions (UI and API surface both enforce); critical warnings
-  block finalize/approve until acknowledged with a recorded justification;
-  approved reports are immutable — corrections are linked amendments.
-- **Secrets server-side**: registry/router/bridge are the only places config is
-  projected; client sees names, capabilities, health booleans, and policy
-  manifest.
-- **Data hygiene**: audit deny-list + JSON logs without query strings +
-  422s that never echo values.
+- **Grounding**: drafts are compared against the transcript for
+  numbers/doses/units/laterality/negation/dates/identifiers (bilingual units,
+  Jalali↔Gregorian); mismatches surface as severity-tagged clinician-review
+  warnings, never silent edits. `10 mg`→`100 mg`, `right`→`left`,
+  `no effusion`→`effusion` are pinned critical by the test pack.
+- **Two-step sign-off**: draft → finalized → approved only via explicit clinician
+  actions; critical warnings block sign-off until acknowledged with a recorded
+  justification; approved reports are immutable (corrections are linked
+  amendments).
+- **Secrets stay server-side**: the client only ever sees provider names,
+  capabilities, health booleans, and the policy manifest.
+- **Data hygiene**: audit deny-list, JSON logs without query strings, and 422s
+  that never echo submitted values.
 
-## Test & lint
+## Docs & known gaps
 
-```bash
-.venv/bin/python -m pytest        # backend + ai
-.venv/bin/ruff check ai backend tests
-```
-
-## Docs
-
-- `docs/ASSESSMENT.md` — reference analysis, conflicts, decisions (required reading before Phase 2)
-- `docs/ARCHITECTURE.md` — boundaries, contracts, data flow, safety model
-- `docs/API.md` · `docs/WEBSOCKET_PROTOCOL.md` — wire contracts
-- `docs/DEPLOYMENT.md` — production notes
-- `docs/SOURCE_MAP.md` · `docs/THIRD_PARTY_NOTICES.md` — references & attribution
-- `docs/ROADMAP.md` — phase-by-phase remaining work with acceptance criteria
-
-## Known gaps (honesty ledger)
-
-1. WPF client + `MedicalScribe.WPF.Tests` cannot be compiled in this Linux
-   sandbox (no .NET SDK; network policy blocks installs) — the CI pipeline is
-   the compiler: `client-linux` runs the full WPF build against the targeting
-   pack and `client-windows` runs it natively with xunit. Runtime behavior
-   (window chrome, hotkeys, NAudio device handling, the Phase 6 report/
-   templates/command screens) still needs a human pass on a Windows machine.
-2. Persistence landed in Phase 7 (SQLite/Postgres write-through + durable
-   reads after eviction/restart, verified against a real server restart),
-   but integration tests run on sqlite+aiosqlite, not a live Postgres — the
-   compose-profile CI job with real postgres/redis is still open (Phase 8).
-   Cost-budget counters are durable since Phase 8. The WPF client rotates
-   tokens proactively (refresh timer fires 60 s before access-token expiry,
-   retries on network blips, drops to login only when the rotation is
-   rejected) — compile + unit-verified in CI; runtime behavior still needs
-   the manual Windows pass (see #1).
-3. Heartbeat frames are idle-timeout only (4408); explicit app-level pings +
-   nginx read-timeout tuning are deferred to Phase 8.
-4. Cloud STT/LLM adapters (Deepgram/Speechmatics/OpenAI/Anthropic/Gemini)
-   are verified against recorded fixtures + scripted transports, never
-   against live vendor accounts (no credentials in this environment); first
-   credentialed deployment should smoke `GET /api/v1/providers?probe=health`
-   and one batch transcribe + one draft per vendor. Template extraction is
-   likewise scripted-LLM-verified only.
-5. The Phase 6 terminology catalog is a curated starter set (~50 entries);
-   clinically-driven extension (and its DB-backed storage) continues in P7.
-   Validation is heuristic NLP (cue scopes, proximity windows) — deliberately
-   advisory-with-critical-flags, never an editor; false negatives are possible
-   and the two-step sign-off is the safety net.
-6. Cost-budget counters are durable since Phase 8 (boot-time backfill from
-   `ai_requests`; fail-open only while the DB is unreachable at boot).
-7. Prometheus `/metrics` is live (Phase 8); OTel tracing requires the
-   optional `observability` extra and is off by default.
-8. The 20-session load number was measured against the **mock STT provider
-   in a sandbox** (harness: `infrastructure/load/ws_loadtest.py`); the
-   production-shape soak (4 GB VM + local llama-server, 2 h) still needs
-   real hardware. MSIX packaging/signing is templated + documented
-   (`client/packaging/`, `docs/RELEASE.md`) but not CI-automated — it needs
-   one iteration on a Windows machine with the real certificate.
-9. First-run wizard covers server URL + mic + hotkey notice; CA-thumbprint
-   pinning review and the full mic-level test are manual Windows passes.
+- `docs/ASSESSMENT.md` · `ARCHITECTURE.md` · `API.md` · `WEBSOCKET_PROTOCOL.md` ·
+  `DEPLOYMENT.md` · `SECURITY.md` · `RELEASE.md` · `ROADMAP.md` ·
+  `SOURCE_MAP.md` · `THIRD_PARTY_NOTICES.md`
+- Honest caveats worth knowing before a pilot: the WPF app is compile-verified
+  in CI but still needs a human pass on a real Windows machine; cloud STT/LLM
+  adapters are verified against recorded fixtures, not live vendor accounts; the
+  20-session load number was measured against the mock STT provider; MSIX
+  packaging/signing is documented but not automated. `docs/ROADMAP.md` tracks
+  the rest.
