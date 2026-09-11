@@ -39,11 +39,50 @@ data must not echo back through error paths).
 | GET | `/api/v1/providers?kind=stt|llm&probe=health` | optional | registry listing: `{name, kind, description, configured, capabilities{privacy_class,...}, health?}` |
 | GET | `/api/v1/observability/stats` | optional | process metrics snapshot — counters/gauges/latency plus **Phase 5**: `provider_health` (HealthTracker snapshot incl. EWMA latency + demotion state) and `cost` (daily token budget ledger). Prometheus endpoint: P8 |
 
-## Reports (draft generation landed in Phase 4)
+## Reports (draft generation Phase 4 · lifecycle Phase 6)
+
+Every transition is an explicit clinician action; AI output enters as a
+**draft** and never becomes a medical record on its own (spec §5/§8/§10).
 
 | Method | Path | Auth | Notes |
 |---|---|---|---|
-| POST | `/api/v1/reports/{encounter_id}/draft` | optional | JSON body: `{transcript (1..80k chars), template?{name, sections[{id,title,instruction}]}, patient_context?{name,age,sex,mrn,encounter_date}, language, mode, privacy_required, provider}`. Grounded strict-JSON drafting with one repair round-trip; response carries `sections[]` (template order), `missing_sections[]` (`[[MISSING]]` = no transcript evidence — never invented), `warnings[]` (`unverified_number` / `laterality_unverified` / `negation_shift_suspected`), `phi_redaction_applied` and token `usage`. Routing obeys the privacy wall; cloud providers receive PHI-scrubbed input by default. Drafts are stateless until Phase 7 (finalize/approve land in P6/P7). Errors: 422 VALIDATION, 502 PROVIDER_UNAVAILABLE (incl. unrepairable JSON; `details.tried[]` lists every chain member that failed), 503 NO_PROVIDER. Phase 5: retryable provider failures walk the router's privacy-filtered fallback chain; the response's `provider` is the one that actually answered and a `provider_fallback` warning is appended (kill switch `MS_ROUTING__FALLBACK_ENABLED=false` restores hard-fail). When `MS_ROUTING__BUDGET_TOKENS_PER_DAY` is set and spent, cloud providers are excluded (soft stop → local only; `routing_reason` says so). |
+| POST | `/api/v1/reports/{encounter_id}/draft` | optional | JSON body: `{transcript (1..80k chars) **or** session_id (assembles the stored transcript: paragraph/section markers become structure, terminology-normalized view feeds the prompt), template_key (server template) **or** template?{name, sections[{id,title,instruction}]}, patient_context?{name,age,sex,mrn,encounter_date}, language, mode, privacy_required, provider}`. Grounded strict-JSON drafting with one repair round-trip; response carries `report_id` (stored server-side; `draft_id` is a compat alias), `sections[]` (template order), `missing_sections[]` (`[[MISSING]]` = no transcript evidence — never invented), `warnings[]` (see validation codes below; each has `id`, `severity` info/warning/critical, `evidence`, `acknowledged`), `terminology_substitutions`, `transcript_source`, `phi_redaction_applied` and token `usage`. Routing obeys the privacy wall; cloud providers receive PHI-scrubbed input by default. Phase 5 fallback chain semantics unchanged. Errors: 422 VALIDATION (neither transcript nor session; empty session), 502 PROVIDER_UNAVAILABLE, 503 NO_PROVIDER. |
+| GET | `/api/v1/reports?encounter_id=…` | optional | list reports for an encounter (summaries with status + warning counts). |
+| GET | `/api/v1/reports/{report_id}` | optional | full report: sections, warnings (with acknowledgment state), lifecycle metadata. 404 for unknown/expired ids. |
+| PATCH | `/api/v1/reports/{report_id}` | optional | body `{sections: {<id>: <markdown>}}` — clinician edits (revision-tracked, audited). Draft/finalized only; **approved is immutable** → 409 `SESSION_STATE` (amend instead). Unknown section id → 409. |
+| POST | `/api/v1/reports/{report_id}/acknowledge` | optional | body `{warning_id, justification (3..1000 chars)}` — records the clinician's review justification against the warning (audit trail). 409 when the report is approved or the justification is too short; 404 for unknown warning ids. |
+| POST | `/api/v1/reports/{report_id}/finalize` | optional | draft → finalized. **409 while critical warnings are unacknowledged** (each needs a recorded justification first — spec §18 acceptance). |
+| POST | `/api/v1/reports/{report_id}/approve` | optional | finalized → approved (separate explicit action; cannot be reached from draft). Same critical-acknowledgment gate. Approved versions are immutable and pinned in the store. |
+| POST | `/api/v1/reports/{report_id}/reopen` | optional | finalized → draft (clinician pull-back before approval). |
+| POST | `/api/v1/reports/{report_id}/amend` | optional | approved → **new linked draft** (`amended_from` points at the approved version, which stays untouched). Corrections after approval always go through amendments. |
+
+Validation warning codes (`api/services/validation.py`, spec §9):
+`unverified_number` (incl. dose near-misses — "10 mg → 100 mg" is critical),
+`unit_mismatch` (mg vs mcg), `laterality_mismatch` (right↔left, critical),
+`laterality_unverified`, `negation_mismatch` ("no effusion"→"effusion",
+critical), `negation_added`, `negation_shift_suspected`, `unverified_date`,
+`date_mismatch` (critical, cross-calendar Jalali↔Gregorian comparison),
+`unverified_identifier` (critical, masked in messages), `unverified_anatomy`,
+`provider_fallback` (info). Validation NEVER rewrites content — warnings only.
+
+## Report templates (Phase 6 — data-driven, spec §10)
+
+| Method | Path | Auth | Notes |
+|---|---|---|---|
+| GET | `/api/v1/report-templates` | optional | catalog: built-ins (`general-clinical-note`, `soap-note`, `radiology-report`, `ultrasound-report`, `ct-report`, `mri-report`) + custom. Each: `{key, name, category, description, sections[{id,title,instruction,required,format_style}], builtin, version}`. |
+| GET | `/api/v1/report-templates/{key}` | optional | single template; 404 unknown. |
+| POST | `/api/v1/report-templates` | optional | create custom: `{key?, name, category?, description?, sections[1..20]}`. Section ids `[a-z0-9_]`; format_style ∈ narrative/bullets/numbered/lab_values/heading_with_bullets. 422 on duplicates/bad shapes. |
+| PATCH | `/api/v1/report-templates/{key}` | optional | update custom (bumps `version`); built-ins immutable → 422. |
+| DELETE | `/api/v1/report-templates/{key}` | optional | soft-delete custom (204); built-ins → 422. |
+| POST | `/api/v1/report-templates/{key}/fork` | optional | copy any template into a custom one: `{new_key, new_name?}` → 201. |
+| POST | `/api/v1/report-templates/extract` | optional | Phlox-concept LLM extraction from an example note: `{example_note (20..20k), suggested_name?, mode?, privacy_required?, provider?}` → proposed `{suggested_name, note_type, sections[]}`. **Never auto-persists** — the clinician reviews and explicitly POSTs. Privacy wall + PHI redaction apply like every LLM call. |
+
+## Terminology (Phase 6 — bilingual fa↔en canonicalization, spec §6)
+
+| Method | Path | Auth | Notes |
+|---|---|---|---|
+| GET | `/api/v1/terminology?q=&limit=` | optional | search the catalog (`canonical`, `category`, `variants`). |
+| POST | `/api/v1/terminology/normalize` | optional | `{text}` → `{normalized, substitutions[{original,replacement,category}], reversible: true}`. Derived view only — the stored transcript is never rewritten. Catalog policy: Persian transliterations → English terms (ام‌آرآی → MRI, پرفشاری خون → hypertension per spec §6); native Persian clinical terms (تب، سونوگرافی) stay Persian. Entries can never contain digits, dose units, negation or laterality words (engine-enforced). |
 
 ## Batch transcription (landed in Phase 3)
 
@@ -58,7 +97,7 @@ In-memory only until Phase 7 persistence; last 200 ended sessions are kept
 
 | Method | Path | Auth | Notes |
 |---|---|---|---|
-| GET | `/api/v1/transcripts/{session_id}` | optional | `TranscriptResponse{session_id, provider, language, status(open\|completed), segment_count, audio_duration_ms, segments[]}` where each segment is `{segment_id, text, start_ms, end_ms, language, confidence, edited, revision, updated_at}`. 404 `NOT_FOUND` for unknown sessions. |
+| GET | `/api/v1/transcripts/{session_id}` | optional | `TranscriptResponse{session_id, provider, language, status(open\|completed), segment_count, audio_duration_ms, segments[]}` where each segment is `{segment_id, text, start_ms, end_ms, language, confidence, edited, revision, updated_at, kind (dictated\|paragraph\|section\|finalized_section\|repeat), meta (marker payload, e.g. section_title)}`. 404 `NOT_FOUND` for unknown sessions. |
 | PATCH | `/api/v1/transcripts/{session_id}/segments/{segment_id}` | optional | body `{text}` (≤8000 chars) → `{segment_id, revision, edited, updated_at}`. Identical text is a no-op (revision unchanged). Audited without content. |
 
 These expose what the WS stream finalized; interim frames are never stored.
@@ -66,9 +105,8 @@ These expose what the WS stream finalized; interim frames are never stored.
 ## Planned (contract frozen in phase docs)
 
 - `POST /api/v1/patients/search`, `POST /api/v1/encounters` — P7
-- encounter-scoped transcript/report APIs (`/api/v1/transcripts?encounter_id=…`) — P7 (session-scoped live API already shipped in P2)
-- `POST /api/v1/report-templates` (+ `POST /report-templates/extract-from-example`) — P6
-- `PATCH /api/v1/reports/{encounter}/draft/sections/{id}` (server-side storage) → `POST .../finalize` → `POST .../approve` — P6/P7 (two-step sign-off is non-negotiable; drafts are client-held until P7)
+- encounter-scoped transcript/report listing (`/api/v1/transcripts?encounter_id=…`) — P7 (session-scoped live API shipped in P2; report listing by encounter shipped in P6)
+- PostgreSQL persistence for templates/reports/revisions (in-memory stores are the service seam) — P7
 - `GET /api/v1/audit/...` (admin) — P7
 - WS: see `docs/WEBSOCKET_PROTOCOL.md`
 

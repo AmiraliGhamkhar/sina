@@ -1,6 +1,6 @@
 # MedicalScribe Architecture
 
-Status: Phase 1 implemented · Target: production-oriented medical STT +
+Status: Phase 6 implemented · Target: production-oriented medical STT +
 clinical documentation platform.
 
 ## 1. System shape
@@ -111,19 +111,28 @@ mic (NAudio WASAPI, 16k mono PCM16)                    [done P2]
   → transcript.interim/final frames                    → live transcript view
   → final segments in TranscriptStore (in-mem LRU)     [done P2]
   → Transcript/Segment tables                          [P7]
-  → edits (clinician) / voice commands (parser, P6)
-  → POST /reports/{enc}/draft: LLMProvider via prompt built from
-    transcript + template + context ONLY (grounding, §7) [done P4]
-  → light fidelity check on draft (numbers/laterality/negation) [done P4]
-  → full validation pass (units/dates/IDs dictionary, P6)
-    → warnings frames → clinician review
-  → explicit finalize → explicit approve → audit + immutable version  [P6/P7]
+  → final segment → voice-command parser (whole-utterance exact/anchored
+    match; ambiguous triggers stay in the text + COMMAND_AMBIGUOUS) [done P6]
+  → effects: paragraph/section markers, delete-last-sentence (journaled
+    undo), repeat, voice pause/resume  → TranscriptStore [done P6]
+  → edits (clinician) — revision-tracked                                [done P2]
+  → POST /reports/{enc}/draft: LLMProvider via prompt built from the
+    marker-aware, terminology-normalized session view (or inline text) +
+    template + context ONLY (grounding, §7)                            [done P4/P6]
+  → full validation pass (doses/units/laterality/negation/dates/
+    identifiers/anatomy; bilingual; Jalali↔Gregorian)                  [done P6]
+    → severity-tagged warnings on the stored draft → clinician review
+  → acknowledge (recorded justification) → explicit finalize → explicit
+    approve → audit + immutable version → amendments are linked drafts
+                                                                        [done P6; P7 persists]
 ```
 
 AI output is *draft material* by construction: the Report state machine
-(`draft → finalized → approved`) only advances via explicit authenticated
-user actions; there is no code path that writes an approved report without a
-recorded clinician identity.
+(`draft → finalized → approved` in `api/services/report_store.py`) only
+advances via explicit actions; finalize/approve are blocked while critical
+validation warnings are unacknowledged, and approved reports are immutable —
+corrections start amendment drafts linked to the approved version. There is
+no code path that writes an approved report without a recorded user action.
 
 ## 6. Medical safety model (spec §8/§9)
 
@@ -132,16 +141,33 @@ recorded clinician identity.
   instructed that missing information must be emitted as
   `null`/`""`/`"missing"`, never invented. Temperature fixed low; JSON mode +
   repair (Phlox concept) for strict section output.
-- **Post-generation validation service** (`api/services/validation.py`, P6):
-  extracts numeric+dose+unit tokens, laterality words, negation scopes,
-  dates, identifiers from the transcript, and checks each survives in the
-  draft *unchanged*; mismatches or dropped negatives become
-  `VALIDATION_WARNING` records attached to the draft (and `warning` WS frames
-  when produced interactively). Validation compares transcript→draft; it
-  never rewrites text automatically.
-- **Terminology normalization** is a bounded dictionary step (Persian ↔
-  English medical lexicon, e.g. "ام ار آی" → "MRI") applied to *transcript
-  display/analytics*, never to stored dictation truth.
+- **Post-generation validation service** (`api/services/validation.py`, done
+  P6): extracts unit-aware quantities (۴۰ میلی‌گرم == 40 mg, cc≈ml), dose
+  near-misses with drug proximity (10→100 mg = critical), laterality pairs
+  with swap detection, term-level negation scopes (بدون/عدم/ندارد/نمی/منفی +
+  English cues, cut at contrast conjunctions), dates (Gregorian + Jalali with
+  conversion + month names), identifiers (phone/national-id/MRN) and anatomy
+  grounding — from the transcript AND its terminology-normalized view
+  (synonym union, never a fabrication source). Mismatches become
+  severity-tagged warnings attached to the stored draft; the client surfaces
+  them and the lifecycle gates on unacknowledged criticals. Validation
+  compares transcript→draft; it never rewrites text automatically.
+- **Terminology normalization** (`api/services/terminology*.py`, done P6) is
+  a bounded, engine-guarded dictionary step (Persian ↔ English medical
+  lexicon, e.g. "ام ار آی" → "MRI"): reversible substitutions, whole-term
+  matching, and the engine refuses catalog entries containing digits, dose
+  units, negation or laterality words — applied to the *derived* prompt/
+  validation view, never to stored dictation truth.
+- **Voice commands** (`api/services/voice_commands/`, done P6): commands are
+  distinguishable from clinical speech by whole-utterance matching; a trigger
+  inside longer speech is ambiguity (kept + warned), never a deletion. The
+  catalog is data (manifest re-exports it); effects are journaled and
+  reversible via `undo_last`; voice-pause keeps audio flowing so the resume
+  command stays audible.
+- **Report templates** (`api/services/templates.py`, done P6): sections are
+  server data (built-ins seeded, custom via CRUD/fork); the WPF UI renders
+  whatever the server returns. LLM extraction (Phlox concept) proposes only —
+  persistence is an explicit clinician action.
 - Language policy: fa, en, fa-en mixed; providers must keep embedded English
   medical terms verbatim (mock corpus + tests encode this expectation).
 

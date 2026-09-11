@@ -17,6 +17,7 @@ using System.Threading.Tasks;
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using MedicalScribe.WPF.Infrastructure;
 
 namespace MedicalScribe.WPF.ViewModels;
 
@@ -25,10 +26,12 @@ public sealed record CommandLogEntry(string Time, string Command, string Detail)
 public sealed partial class MedicalEditorViewModel : ObservableObject
 {
     private readonly LiveTranscriptViewModel _transcript;
+    private readonly IApiClient? _api;
 
-    public MedicalEditorViewModel(LiveTranscriptViewModel transcript)
+    public MedicalEditorViewModel(LiveTranscriptViewModel transcript, IApiClient? api = null)
     {
         _transcript = transcript;
+        _api = api;
     }
 
     [ObservableProperty]
@@ -69,5 +72,43 @@ public sealed partial class MedicalEditorViewModel : ObservableObject
     {
         EditBuffer = string.IsNullOrEmpty(EditBuffer) ? "\n" : EditBuffer + "\n\n";
         CommandLog.Insert(0, new CommandLogEntry(DateTime.Now.ToString("HH:mm:ss"), "new_paragraph", "via editor button"));
+    }
+
+    /// <summary>Terminology normalization PREVIEW (Phase 6): server-side
+    /// canonicalization of Persian dictation variants (ام‌آرآی → MRI …).
+    /// Purely a derived view — the stored transcript is never rewritten and
+    /// the substitution list is reversible.</summary>
+    [RelayCommand]
+    private async Task NormalizePreviewAsync()
+    {
+        if (_api is null)
+        {
+            EditorNote = "normalization preview needs the API client (not configured)";
+            return;
+        }
+        var text = string.IsNullOrWhiteSpace(EditBuffer) ? _transcript.FullText : EditBuffer;
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            EditorNote = "nothing to normalize — buffer and transcript are empty";
+            return;
+        }
+        try
+        {
+            var result = await _api.NormalizeTextAsync(text);
+            if (result is null)
+            {
+                EditorNote = "server returned no normalization result";
+                return;
+            }
+            EditBuffer = result.Normalized;
+            var applied = string.Join(", ", result.Substitutions.Select(s => $"{s.Original} → {s.Replacement}"));
+            EditorNote = result.Substitutions.Count == 0
+                ? "no terminology substitutions applied (text already canonical)"
+                : $"{result.Substitutions.Count} reversible substitutions: {applied}";
+        }
+        catch (ApiException ex)
+        {
+            EditorNote = $"normalization failed: {ex.DetailMessage}";
+        }
     }
 }

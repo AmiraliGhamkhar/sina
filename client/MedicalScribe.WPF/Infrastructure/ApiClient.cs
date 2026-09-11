@@ -87,11 +87,78 @@ public sealed class ApiClient : IApiClient
     public Task<PrincipalDto?> GetCurrentUserAsync(CancellationToken ct = default) =>
         GetAsync<PrincipalDto>("/api/v1/auth/me", ct);
 
+    // -- Phase 6: templates + report lifecycle -----------------------------------
+
+    public async Task<IReadOnlyList<ReportTemplateDto>> GetReportTemplatesAsync(
+        CancellationToken ct = default)
+    {
+        var list = await GetAsync<TemplateListDto>("/api/v1/report-templates", ct);
+        return list?.Templates ?? new List<ReportTemplateDto>();
+    }
+
+    public async Task<string> ForkTemplateAsync(
+        string sourceKey, string newKey, string? newName, CancellationToken ct = default)
+    {
+        var forked = await PostAsync<ReportTemplateDto>(
+            $"/api/v1/report-templates/{sourceKey}/fork",
+            new { new_key = newKey, new_name = newName }, ct);
+        return forked.Key;
+    }
+
+    public Task<ReportDraftResponseDto> CreateReportDraftAsync(
+        ReportDraftRequestDto request, string encounterId, CancellationToken ct = default) =>
+        PostAsync<ReportDraftResponseDto>($"/api/v1/reports/{encounterId}/draft", request, ct);
+
+    public Task<ReportDto?> GetReportAsync(string reportId, CancellationToken ct = default) =>
+        GetAsync<ReportDto>($"/api/v1/reports/{reportId}", ct);
+
+    public Task<ReportDto> PatchReportSectionsAsync(
+        string reportId, IReadOnlyDictionary<string, string> sections, CancellationToken ct = default) =>
+        PatchAsync<ReportDto>($"/api/v1/reports/{reportId}", new { sections }, ct);
+
+    public Task<ReportDto> AcknowledgeWarningAsync(
+        string reportId, string warningId, string justification, CancellationToken ct = default) =>
+        PostAsync<ReportDto>($"/api/v1/reports/{reportId}/acknowledge",
+            new { warning_id = warningId, justification }, ct);
+
+    public Task<ReportDto> FinalizeReportAsync(string reportId, CancellationToken ct = default) =>
+        PostAsync<ReportDto>($"/api/v1/reports/{reportId}/finalize", new { }, ct);
+
+    public Task<ReportDto> ReopenReportAsync(string reportId, CancellationToken ct = default) =>
+        PostAsync<ReportDto>($"/api/v1/reports/{reportId}/reopen", new { }, ct);
+
+    public Task<ReportDto> ApproveReportAsync(string reportId, CancellationToken ct = default) =>
+        PostAsync<ReportDto>($"/api/v1/reports/{reportId}/approve", new { }, ct);
+
+    public Task<ReportDto> AmendReportAsync(string reportId, CancellationToken ct = default) =>
+        PostAsync<ReportDto>($"/api/v1/reports/{reportId}/amend", new { }, ct);
+
+    public Task<NormalizationResultDto?> NormalizeTextAsync(
+        string text, CancellationToken ct = default) =>
+        PostAsyncOrNullAsync<NormalizationResultDto>(
+            "/api/v1/terminology/normalize", new { text }, ct);
+
     // -- transport plumbing ----------------------------------------------------
 
     private async Task<T?> GetAsync<T>(string path, CancellationToken ct)
     {
         using var response = await SendAsync(HttpMethod.Get, path, content: null, ct);
+        return await ReadJsonAsync<T>(response, ct);
+    }
+
+    private async Task<T> PatchAsync<T>(string path, object body, CancellationToken ct)
+    {
+        using var response = await SendAsync(
+            HttpMethod.Patch, path, JsonContent.Create(body, options: JsonOptions), ct);
+        var result = await ReadJsonAsync<T>(response, ct);
+        return result ?? throw new ApiException(
+            response.StatusCode, "EMPTY_RESPONSE", "server returned no body");
+    }
+
+    private async Task<T?> PostAsyncOrNullAsync<T>(string path, object body, CancellationToken ct)
+    {
+        using var response = await SendAsync(
+            HttpMethod.Post, path, JsonContent.Create(body, options: JsonOptions), ct);
         return await ReadJsonAsync<T>(response, ct);
     }
 

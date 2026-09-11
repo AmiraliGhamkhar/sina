@@ -83,13 +83,26 @@ public class WsFrameParserTests
     }
 
     [Fact]
-    public void ParsesCommandWithArgs()
+    public void ParsesCommandDetectedWithDictArgs()
+    {
+        // protocol v1: the frame type is "command.detected"; args is a dict
+        var evt = WsFrameParser.Parse(
+            """{"v":1,"type":"command.detected","session_id":"ws_abc","command":"insert_section","args":{"section_title":"طرح درمان"},"utterance_text":"درج بخش طرح درمان","segment_id":"seg_0002"}""");
+        var cmd = Assert.IsType<WsCommandEvent>(evt);
+        Assert.Equal("insert_section", cmd.Command);
+        Assert.Equal("طرح درمان", cmd.Args["section_title"]);
+        Assert.Equal("درج بخش طرح درمان", cmd.UtteranceText);
+        Assert.Equal("seg_0002", cmd.SegmentId);
+    }
+
+    [Fact]
+    public void ParsesCommandDetectedWithoutArgs()
     {
         var evt = WsFrameParser.Parse(
-            """{"v":1,"type":"transcript.command","session_id":"ws_abc","command":"dosage.insert","args":["40","mg"],"target_segment_id":"seg_0002"}""");
+            """{"v":1,"type":"command.detected","command":"new_paragraph","args":{}}""");
         var cmd = Assert.IsType<WsCommandEvent>(evt);
-        Assert.Equal(new[] { "40", "mg" }, cmd.Args);
-        Assert.Equal("seg_0002", cmd.TargetSegmentId);
+        Assert.Empty(cmd.Args);
+        Assert.Equal("", cmd.UtteranceText);
     }
 
     [Fact]

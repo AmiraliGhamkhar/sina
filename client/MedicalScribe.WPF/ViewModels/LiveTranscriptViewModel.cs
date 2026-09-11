@@ -39,6 +39,11 @@ public sealed partial class LiveTranscriptViewModel : ObservableObject, ILiveTra
     [ObservableProperty]
     private string _statusNote = "idle — start a dictation from the recorder screen";
 
+    /// <summary>Server session id of the current/last dictation (set when
+    /// session.started arrives; consumed by report drafting).</summary>
+    [ObservableProperty]
+    private string? _sessionId;
+
     public ObservableCollection<TranscriptSegmentEntry> Segments { get; } = [];
 
     public ObservableCollection<TranscriptWarning> Warnings { get; } = [];
@@ -76,6 +81,56 @@ public sealed partial class LiveTranscriptViewModel : ObservableObject, ILiveTra
     public void AddWarning(TranscriptWarning warning) => Warnings.Add(warning);
 
     public void SetStatusNote(string note) => StatusNote = note;
+
+    public void SetSessionId(string? sessionId) => SessionId = sessionId;
+
+    /// <summary>Structural marker from a voice command — rendered as its own
+    /// entry so the paragraph/section structure survives editing.</summary>
+    public void InsertMarker(TranscriptSegmentEntry marker)
+    {
+        Segments.Add(marker);
+        SetInterim(null);
+        OnPropertyChanged(nameof(FullText));
+        UpdateSegmentCommands();
+    }
+
+    /// <summary>Mirror of the server delete-last-sentence effect: remove the
+    /// last sentence of the last text-bearing entry (markers skipped).</summary>
+    public void RemoveLastSentence()
+    {
+        for (var i = Segments.Count - 1; i >= 0; i--)
+        {
+            var entry = Segments[i];
+            if (string.IsNullOrWhiteSpace(entry.Text) || entry.Origin == SegmentOrigin.Command)
+            {
+                continue;
+            }
+            var sentences = SplitSentences(entry.Text);
+            if (sentences.Count <= 1)
+            {
+                Segments.RemoveAt(i);
+            }
+            else
+            {
+                entry.Text = string.Join(" ", sentences.Take(sentences.Count - 1));
+                entry.MarkEdited();
+            }
+            OnPropertyChanged(nameof(FullText));
+            UpdateSegmentCommands();
+            return;
+        }
+    }
+
+    private static readonly System.Text.RegularExpressions.Regex SentenceSplit =
+        new("(?<=[.!?؟؛])\s+", System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    /// <summary>Split on sentence-final punctuation, KEEPING the punctuation
+    /// attached — mirrors the server's delete-last-sentence semantics.</summary>
+    private static List<string> SplitSentences(string text) =>
+        SentenceSplit.Split(text)
+            .Select(s => s.Trim())
+            .Where(s => s.Length > 0)
+            .ToList();
 
     public void ClearTranscript()
     {

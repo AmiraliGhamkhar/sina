@@ -34,8 +34,14 @@ public sealed record WsFinalEvent(
     string Text, string SegmentId, int StartMs, int EndMs, string? Language, double? Confidence)
     : WsEvent("transcript.final");
 
-public sealed record WsCommandEvent(string Command, IReadOnlyList<string> Args, string? TargetSegmentId)
-    : WsEvent("transcript.command");
+/// <summary>Voice command recognized server-side (protocol v1: type
+/// "command.detected"). Args is a dict (e.g. {"section_title": "طرح"}).</summary>
+public sealed record WsCommandEvent(
+    string Command,
+    IReadOnlyDictionary<string, string> Args,
+    string UtteranceText,
+    string? SegmentId)
+    : WsEvent("command.detected");
 
 public sealed record WsWarningEvent(string Code, string Message, string? SegmentId)
     : WsEvent("warning");
@@ -91,8 +97,9 @@ public static class WsFrameParser
                     Str(root, "text") ?? "", Str(root, "segment_id") ?? "", Int(root, "start_ms"),
                     Int(root, "end_ms"), Str(root, "language"), Dbl(root, "confidence"))
                 { SessionId = sessionId },
-                "transcript.command" => new WsCommandEvent(
-                    Str(root, "command") ?? "", Arr(root, "args"), Str(root, "target_segment_id"))
+                "command.detected" => new WsCommandEvent(
+                    Str(root, "command") ?? "", StrDict(root, "args"),
+                    Str(root, "utterance_text") ?? "", Str(root, "segment_id"))
                 { SessionId = sessionId },
                 "warning" => new WsWarningEvent(
                     Str(root, "code") ?? "", Str(root, "message") ?? "", Str(root, "segment_id"))
@@ -126,6 +133,23 @@ public static class WsFrameParser
 
     private static bool Bool(JsonElement e, string name) =>
         e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.True;
+
+    private static IReadOnlyDictionary<string, string> StrDict(JsonElement e, string name)
+    {
+        if (!e.TryGetProperty(name, out var v) || v.ValueKind != JsonValueKind.Object)
+        {
+            return new Dictionary<string, string>();
+        }
+        var dict = new Dictionary<string, string>();
+        foreach (var prop in v.EnumerateObject())
+        {
+            if (prop.Value.ValueKind == JsonValueKind.String)
+            {
+                dict[prop.Name] = prop.Value.GetString() ?? "";
+            }
+        }
+        return dict;
+    }
 
     private static IReadOnlyList<string> Arr(JsonElement e, string name)
     {

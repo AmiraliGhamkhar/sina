@@ -28,8 +28,12 @@ from api.routes import API_ROUTERS, ROOT_ROUTERS, WS_ROUTERS
 from api.services.audit import AuditLog
 from api.services.cost import CostLedger
 from api.services.health_mirror import HealthMirror
+from api.services.report_store import ReportStore
 from api.services.session_registry import SessionRegistry
+from api.services.templates import TemplateService
+from api.services.terminology import TerminologyNormalizer
 from api.services.transcript_store import TranscriptStore
+from api.services.voice_commands import VoiceCommandService
 from api.telemetry import Metrics, setup_logging
 from api.version import API_VERSION, APP_NAME, PHASE, WS_PROTOCOL_VERSION
 
@@ -93,6 +97,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.state.ai_registry = build_default_registry()
     app.state.transcript_store = TranscriptStore()
+    app.state.terminology = TerminologyNormalizer()
+    app.state.template_service = TemplateService()
+    app.state.report_store = ReportStore()
+    app.state.voice_commands = VoiceCommandService()
     app.state.audit = AuditLog(
         Path(settings.audit.log_file) if settings.audit.enabled else None,
         enabled=settings.audit.enabled,

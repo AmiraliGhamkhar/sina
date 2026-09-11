@@ -23,6 +23,12 @@ TRANSCRIPT = (
     "سابقه hypertension. دوز 40 mg furosemide. کد ملی 1234567890."
 )
 
+# Phase 6: the draft prompt uses the terminology-normalized view of the
+# transcript (درد قفسه سینه → chest pain); the mock echoes it verbatim.
+from api.services.terminology import TerminologyNormalizer  # noqa: E402
+
+NORMALIZED_TRANSCRIPT = TerminologyNormalizer().normalize(TRANSCRIPT).normalized
+
 
 def _post_draft(client: TestClient, encounter: str = "enc-42", **overrides):
     body = {"transcript": TRANSCRIPT, **overrides}
@@ -83,12 +89,12 @@ def test_draft_with_mock_llm_is_grounded_and_missing_stays_missing(client):
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["provider"] == "mock"
-    assert body["draft_id"].startswith("drw_")
+    assert body["draft_id"].startswith("rpt_")
     assert body["encounter_id"] == "enc-42"
     ids = [s["id"] for s in body["sections"]]
     assert ids == ["chief_complaint", "history", "exam", "assessment", "plan"]
     first = body["sections"][0]
-    assert TRANSCRIPT.strip() in first["markdown"]
+    assert NORMALIZED_TRANSCRIPT.strip() in first["markdown"]
     assert first["missing"] is False
     # the mock has no evidence for other sections → they stay marked missing
     assert body["missing_sections"] == ["history", "exam", "assessment", "plan"]
@@ -246,7 +252,7 @@ def test_draft_custom_template_and_unknown_provider_fallback(client):
     assert body["provider"] == "mock"  # non-strict preference falls back
     assert body["template_name"] == "radiology"
     assert [s["id"] for s in body["sections"]] == ["findings", "impression"]
-    assert body["sections"][0]["markdown"] == TRANSCRIPT.strip()
+    assert body["sections"][0]["markdown"] == NORMALIZED_TRANSCRIPT.strip()
 
 
 def test_llm_adapters_visible_in_provider_listing(client):

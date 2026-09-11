@@ -154,7 +154,7 @@ Done notes (deviations recorded honestly):
   budget counters are in-process (restart resets the day; durable spend lives
   with the P7 `ai_requests` table); `absorb` is an average, not CRDT-merged.
 
-## Phase 6 — Commands, templates, validation (next)
+## Phase 6 — Commands, templates, validation ✅ (done — this build)
 - Extensible command parser (`backend/api/services/voice_commands/`):
   registry of command handlers w/ bilingual triggers, exact/anchored match
   policy + "command mode" (only strips speech that couldn't be clinical
@@ -168,8 +168,52 @@ Done notes (deviations recorded honestly):
 - Report generator + validator: numbers/doses/units, laterality, negation,
   dates (Jalali+Gregorian), identifiers; emits `ValidationWarning[]`;
   draft/finalize/approve endpoints + immutability of approved versions.
-- Acceptance: medical-safety test pack (spec §18) green; UI shows warnings
-  blocking approve until acknowledged (with recorded justification).
+
+Done notes (deviations recorded honestly):
+- All items landed. Voice commands: `api/services/voice_commands/` package
+  (catalog → parser → effects) — data-driven, bilingual, whole-utterance
+  exact/anchored matching, `فرمان`/"command" mode prefixes, ambiguity keeps
+  text + `COMMAND_AMBIGUOUS` warning (never deletes clinical speech). Effects:
+  paragraph/section/finalized-section markers, delete-last-sentence with
+  journal-backed undo, repeat, voice pause/resume (audio keeps flowing so the
+  resume command stays audible — distinct from control-frame pause which
+  buffers). Hub integration: command utterances never enter the transcript;
+  per-command metrics; `command.detected` frames carry args + utterance.
+- Terminology: `terminology_data.py` (curated catalog: transliterations →
+  English terms incl. spec-listed MRI/CT/ECG/hypertension; native Persian
+  terms stay Persian) + `terminology.py` engine (whole-term longest-match,
+  reversible substitutions, engine REFUSES entries containing digits/units/
+  negation/laterality). `GET /terminology`, `POST /terminology/normalize`.
+  The draft prompt uses the normalized view; validation grounds against
+  raw + normalized (union = synonyms, never fabrications).
+- Templates: `templates.py` service + full CRUD API; built-ins seeded as data
+  (general/soap/radiology/us/ct/mri), immutable; fork; LLM extraction from
+  example note (Phlox concept) returns an UNSAVED proposal. WPF Templates
+  screen is now server-driven + fork.
+- Reports: server-side `report_store.py` with draft → finalized → approved;
+  PATCH sections (revision events), acknowledge-with-justification, finalize
+  and approve both blocked by unacknowledged **critical** warnings, reopen,
+  amend (approved immutable, amendments linked). Draft endpoint accepts
+  `session_id` (marker-aware assembly + terminology view) or inline text.
+- Validation (`validation.py`): unit-aware bilingual quantities (۴۰ میلی‌گرم
+  == 40 mg; cc≈ml), dose near-miss detection (10→100 mg critical, drug
+  proximity), laterality pairs + swap detection (fa+en), term-level negation
+  scope analysis (بدون/عدم/ندارد/نمی/no/without/denies…, contrast-conjunction
+  scope cuts), dates incl. Jalali↔Gregorian conversion + month names,
+  identifiers (phone/national-id/MRN, decimal-safe), anatomy grounding.
+  Old light-check codes preserved (`unverified_number`,
+  `laterality_unverified`, `negation_shift_suspected`) for wire compat.
+- Acceptance: medical-safety pack green (`tests/test_medical_validation.py`:
+  10mg→100mg critical, right→left critical, no-effusion→effusion critical,
+  missing-stays-missing, Jalali date equality/one-day-off, identifier flips,
+  bilingual unit equivalence). WPF report screen shows severity-colored
+  warnings, acknowledgment with justification, finalize/approve blocked by
+  the server (409) and surfaced honestly. 243 backend tests.
+- Not covered honestly: templates/reports/transcripts are in-memory (P7
+  persistence is the seam — service APIs are repository-shaped); template
+  extraction verified against scripted LLMs only; the WPF client compiles in
+  CI (no SDK in the dev sandbox) — command projection + lifecycle logic is
+  unit-tested headlessly, window-level behavior needs the Windows runner.
 
 ## Phase 7 — Persistence, auth, Redis
 - SQLAlchemy models (all §13 entities) + Alembic baseline migration + seed

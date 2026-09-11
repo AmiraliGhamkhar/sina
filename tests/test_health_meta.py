@@ -64,11 +64,19 @@ def test_manifest_is_data_driven_and_phase_honest(client):
     assert "پاراگراف جدید" in fa_trigger["triggers"]
     # Phase 2 switched the live pipeline on (flag must follow the server)
     assert body["features"]["live_transcription"] is True
-    # Phase 4: draft generation is live (finalize/approve stay gated for later phases)
+    # Phase 4: draft generation is live
     assert body["features"]["report_generation"] is True
-    assert body["features"]["voice_commands"] is False
+    # Phase 6: command parsing + lifecycle are live
+    assert body["features"]["voice_commands"] is True
+    assert body["features"]["report_lifecycle"] is True
     assert body["ws_path"] == "/ws/v1/transcribe"
     assert body["max_message_bytes"] > 0
+    # Phase 6: lifecycle states + template keys are server data
+    assert set(body["report_statuses"]) == {"draft", "finalized", "approved"}
+    assert "soap-note" in body["report_template_keys"]
+    # mode prefixes let clinicians force command interpretation
+    prefixes = next(c["mode_prefixes"] for c in body["voice_commands"])
+    assert "فرمان" in prefixes
 
 
 def test_stats_requires_nothing_but_reports_metrics(client):

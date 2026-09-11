@@ -18,6 +18,10 @@ class TranscriptSegmentDto(BaseModel):
     edited: bool = False
     revision: int = 0
     updated_at: str | None = None
+    #: Phase 6 — dictated vs voice-command markers (paragraph/section/…)
+    kind: str = "dictated"
+    #: marker payload, e.g. {"section_title": "طرح درمان"} (None for dictation)
+    meta: dict | None = None
 
 
 class TranscriptResponse(BaseModel):

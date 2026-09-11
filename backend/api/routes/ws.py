@@ -224,6 +224,7 @@ async def _handshake(
         provider_factory=lambda name: websocket.app.state.ai_registry.create(
             ProviderKind.STT, name, settings.provider_config("stt", name)
         ),
+        command_service=getattr(websocket.app.state, "voice_commands", None),
     )
     # started frame first, pump second: deterministic ordering of the first
     # control frame vs provider transcript frames (no race on session.started)

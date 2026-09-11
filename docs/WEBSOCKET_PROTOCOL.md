@@ -102,10 +102,25 @@ Notes:
 - `segment_id` is stable for a given utterance: interims replace the *current*
   segment's provisional text; `transcript.final` commits it. Clients must not
   paste interims into the persistent transcript.
-- Command detection runs server-side (extensible parser, Phase 6). A recognized
-  command is *removed* from transcript text and reported via `command.detected`
-  only when it is distinguishable from clinical speech (exact-trigger or
-  explicit "command mode" segment); ambiguous matches stay in the transcript.
+- Command detection runs server-side (Phase 6: **live**). The parser
+  (`api/services/voice_commands/`) is data-driven (catalog → parser → effects)
+  and bilingual. An utterance is a command ONLY when the whole utterance
+  matches a trigger (exact) or a trigger + free-text argument (anchored,
+  arg-taking commands like "درج بخش سابقه بیماری"); mode prefixes
+  (`فرمان` / "command") force interpretation. A trigger embedded mid-speech
+  is ambiguous → the text STAYS in the transcript and a `COMMAND_AMBIGUOUS`
+  warning is emitted (never silently delete clinical speech, spec §8).
+  Recognized commands are removed from transcript text, reported via
+  `command.detected` (with `args`, `utterance_text`, `segment_id`), and their
+  effects are applied to the session transcript store with an undo journal
+  (`undo_last` reverses the last structural effect). Warning codes:
+  `COMMAND_AMBIGUOUS`, `COMMAND_NO_TARGET` (e.g. nothing to delete/repeat),
+  `COMMAND_MISSING_ARG`, `COMMAND_GATE`, `COMMAND_IGNORED_PAUSED`,
+  `COMMAND_ALREADY_PAUSED`, `COMMAND_NOT_PAUSED`.
+- Voice pause (`pause_recording`) is distinct from the control-frame
+  `session.pause`: audio keeps flowing (so "ادامه ضبط" stays audible) while
+  non-command finals are suppressed from the transcript; interims are
+  suppressed too. The control-frame pause buffers audio instead.
 - `error.recoverable=true` ⇒ client may continue (e.g. provider fell back);
   `false` ⇒ expect close shortly.
 - Heartbeats: the server enforces liveness by idle timeout
@@ -137,5 +152,13 @@ buffers ≤ `MS_WEBSOCKET__PAUSE_BUFFER_MS` then drops with a single
 `AUDIO_DROPPED_PAUSED` warning; queue overflow warns `AUDIO_OVERLOADED`;
 stop flushes the provider with `AUDIO`/`PROVIDER_FLUSH_TIMEOUT` guard. Covered
 by `tests/test_ws_audio_flow.py` (incl. a faulting provider →
-`PROVIDER_UNAVAILABLE` error frame). `command.detected` frames still wait for
-the Phase 6 parser; app-level heartbeat frames for Phase 8.
+`PROVIDER_UNAVAILABLE` error frame).
+
+Phase 6: voice commands are live end-to-end —
+`tests/test_ws_commands_e2e.py` drives a scripted mock STT whose dictation
+interleaves clinical speech with commands (paragraph, delete-last-sentence,
+insert-section, ambiguous trigger, pause/resume) and pins: `command.detected`
+frames with args, transcript-store effects (markers, sentence removal,
+suppression while voice-paused), ambiguity warnings keeping text verbatim,
+and `voice_commands_executed` metrics. App-level heartbeat frames wait for
+Phase 8.

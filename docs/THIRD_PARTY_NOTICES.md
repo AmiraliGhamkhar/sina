@@ -74,6 +74,13 @@ license), redis-py (MIT), argon2-cffi (MIT). Model weights fetched later
 (e.g. GGUF) carry their own licenses — see `models/README.md`; weights are
 never committed.
 
+## Algorithms adapted from public-domain formulations
+
+- `backend/api/services/validation.py::jalali_to_gregorian` — the classic
+  Jalali→Gregorian day-number arithmetic (public-domain formulation used
+  unchanged across jalaali-js and countless ports). Adapted, not copied from
+  any single project; no license encumbrance.
+
 Medical-device posture: none of the reference code grants any regulatory
 claim; MedicalScribe is assistive documentation software with mandatory human
 review (spec §8, §19.18) and must not be characterized as autonomous diagnosis.

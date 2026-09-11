@@ -42,9 +42,10 @@ async def client_manifest(request: Request, principal: OptionalPrincipal) -> Man
         max_message_bytes=ws.max_message_bytes,
         features={  # type: ignore[typeddict-item]
             "live_transcription": features_ok_phase,
+            # Phase 6: command parsing + report lifecycle are live
             "voice_commands": PHASE >= 6,
-            # draft generation live from P4; finalize/approve flow lands in P6/P7
             "report_generation": PHASE >= 4,
+            "report_lifecycle": PHASE >= 6,
             "editing_enabled": True,
             "cloud_providers_enabled": bool(
                 settings.stt.deepgram.api_key or settings.stt.speechmatics.api_key

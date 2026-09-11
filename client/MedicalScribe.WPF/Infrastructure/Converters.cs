@@ -56,6 +56,43 @@ public sealed class InverseBoolToVisibilityConverter : IValueConverter
         throw new NotSupportedException();
 }
 
+/// <summary>Severity → brush: critical is red, warning amber, info muted.</summary>
+public sealed class SeverityToBrushConverter : IValueConverter
+{
+    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        value is string severity
+            ? severity switch
+            {
+                "critical" => new SolidColorBrush(Color.FromRgb(0xDC, 0x26, 0x26)),
+                "warning" => new SolidColorBrush(Color.FromRgb(0xD9, 0x77, 0x06)),
+                _ => new SolidColorBrush(Color.FromRgb(0x64, 0x74, 0x8B)),
+            }
+            : new SolidColorBrush(Colors.Gray);
+
+    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        throw new NotSupportedException();
+}
+
+/// <summary>builtin bool → origin label for the templates list.</summary>
+public sealed class TemplateOriginConverter : IValueConverter
+{
+    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        value is true ? "built-in · immutable" : "custom";
+
+    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        throw new NotSupportedException();
+}
+
+/// <summary>bool → "acknowledged"/"unacknowledged" label.</summary>
+public sealed class BoolToYesNoConverter : IValueConverter
+{
+    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        value is true ? "acknowledged" : "unacknowledged";
+
+    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        throw new NotSupportedException();
+}
+
 public sealed class NullToCollapsedConverter : IValueConverter
 {
     public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture) =>

@@ -7,6 +7,7 @@
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
         <Grid Grid.Row="0">
@@ -30,9 +31,12 @@
                     <RowDefinition Height="*"/>
                 </Grid.RowDefinitions>
                 <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
-                    <TextBlock Text="Template:" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                    <TextBox Text="{Binding TemplateKey}" Width="220" IsReadOnly="True"/>
+                    <TextBlock Text="Encounter:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                    <TextBox Text="{Binding EncounterId}" Width="140"/>
+                    <TextBlock Text="Template:" VerticalAlignment="Center" Margin="16,0,8,0"/>
+                    <TextBox Text="{Binding TemplateKey}" Width="200"/>
                     <Button Content="Generate draft" Margin="16,0,0,0" Command="{Binding GenerateCommand}"/>
+                    <Button Content="Save edits" Style="{StaticResource SecondaryButton}" Margin="8,0,0,0" Command="{Binding SaveEditsCommand}"/>
                 </StackPanel>
                 <TextBox Grid.Row="1" Text="{Binding DraftText, UpdateSourceTrigger=PropertyChanged}"
                          AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"
@@ -41,11 +45,54 @@
             </Grid>
         </Border>
 
-        <Grid Grid.Row="3" Margin="0,12,0,0">
+        <!-- Phase 6: validation warnings block finalize/approve until acknowledged -->
+        <Border Grid.Row="3" Style="{StaticResource Card}" Margin="0,12,0,0" Padding="12">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+                <TextBlock FontSize="13">
+                    <Run Text="Validation warnings (" FontWeight="SemiBold"/>
+                    <Run Text="{Binding BlockingCriticals, Mode=OneWay}"/>
+                    <Run Text=" blocking critical) — acknowledge each with a recorded justification before finalizing."/>
+                </TextBlock>
+                <ListBox x:Name="WarningList" Grid.Row="1" ItemsSource="{Binding Warnings}" BorderThickness="0" Background="Transparent"
+                         MaxHeight="120" Margin="0,6,0,6" HorizontalContentAlignment="Stretch">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <Grid Margin="0,2">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="70"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="{Binding Severity}" FontWeight="SemiBold"
+                                           Foreground="{Binding Severity, Converter={StaticResource SeverityBrush}}"/>
+                                <TextBlock Grid.Column="1" Text="{Binding Message}" TextWrapping="Wrap"/>
+                                <TextBlock Grid.Column="2" Text="{Binding Acknowledged, Converter={StaticResource BoolToYesNo}}"
+                                           Foreground="{StaticResource MutedInk}" Margin="12,0,0,0"/>
+                            </Grid>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+                <StackPanel Grid.Row="2" Orientation="Horizontal">
+                    <TextBox Text="{Binding Justification, UpdateSourceTrigger=PropertyChanged}" Width="420"
+                             ToolTip="Justification recorded with the acknowledgment (audit trail)"/>
+                    <Button Content="Acknowledge selected" Style="{StaticResource SecondaryButton}" Margin="8,0,0,0"
+                            Command="{Binding AcknowledgeSelectedCommand}"
+                            CommandParameter="{Binding SelectedValue, ElementName=WarningList}"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <Grid Grid.Row="4" Margin="0,12,0,0">
             <StackPanel Orientation="Horizontal">
                 <Button Content="Finalize (clinician)" Command="{Binding FinalizeCommand}"/>
                 <Button Content="Approve" Style="{StaticResource DangerButton}" Command="{Binding ApproveCommand}"/>
                 <Button Content="Reopen for editing" Style="{StaticResource SecondaryButton}" Command="{Binding ReopenDraftCommand}"/>
+                <Button Content="Amend (from approved)" Style="{StaticResource SecondaryButton}" Command="{Binding AmendCommand}"/>
             </StackPanel>
             <TextBlock Text="{Binding Message}" HorizontalAlignment="Right" VerticalAlignment="Center"
                        Foreground="{StaticResource MutedInk}"/>

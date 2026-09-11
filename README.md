@@ -33,7 +33,7 @@ Backend (Linux/macOS/Windows, Python 3.11+; production images use 3.12+):
 ```bash
 python -m venv .venv && .venv/bin/pip install -e ".[dev]"
 cp .env.example .env                     # set MS_AUTH__DEV_TOKEN, secrets optional in Phase 1
-.venv/bin/python -m pytest               # 135 tests: + LLM adapters, grounded prompts, draft API
+.venv/bin/python -m pytest               # 243 tests: + commands, terminology, templates, lifecycle, validation
 .venv/bin/python -m uvicorn api.main:app --app-dir backend --port 8000
 curl localhost:8000/health
 curl "localhost:8000/api/v1/providers?probe=health"
@@ -63,9 +63,9 @@ credentials arrive in Phase 7; the server answers 501 + a stable
 | 2 | NAudio capture → WS audio → mock STT stream → live transcript (+ session transcript GET/PATCH) | ✅ done (this build) |
 | 3 | STT adapters: local whisper-server, qwen-asr, Speechmatics, Deepgram (stream+batch) + batch REST endpoint | ✅ done (this build) |
 | 4 | LLM adapters: llama-server + props, OpenAI/Anthropic/Gemini, grounded draft endpoint | ✅ done (this build) |
-| 5 | Router hardening: health fed by task outcomes, latency EWMA ranking, runtime fallback chains (WS + batch + draft), daily token budget soft-stop, optional Redis health mirror | ✅ done (this build) |
-| 6 | Voice commands, terminology, templates, report generation, validation warnings | planned (command catalog served by manifest) |
-| 7 | PostgreSQL + SQLAlchemy + Alembic, JWT/refresh/argon2, Redis rate-limit, audit table, encrypted provider rows | planned (URL normalizer, JWT codec, JSONL audit shipped in P1) |
+| 5 | Router hardening: health fed by task outcomes, latency EWMA ranking, runtime fallback chains (WS + batch + draft), daily token budget soft-stop, optional Redis health mirror | ✅ done |
+| 6 | Voice commands (parser+effects+undo), bilingual terminology, data-driven templates + LLM extraction, report lifecycle (draft→finalized→approved with acknowledged warnings), full clinical validation (doses/units/laterality/negation/dates/identifiers/anatomy) | ✅ done (this build) |
+| 7 | PostgreSQL + SQLAlchemy + Alembic, JWT/refresh/argon2, Redis rate-limit, audit table, encrypted provider rows | planned (URL normalizer, JWT codec, JSONL audit shipped in P1; P6 stores are repository-shaped seams) |
 | 8 | Prometheus/OTel, load tests, MSIX packaging, production hardening | planned |
 
 ## Non-negotiables encoded in this codebase
@@ -73,10 +73,15 @@ credentials arrive in Phase 7; the server answers 501 + a stable
 - **Privacy wall**: `privacy_required` encounters route to LOCAL providers only —
   even under `mode=cloud` or an explicit cloud preference (tested).
 - **Grounding**: prompt contract + validation service compare draft vs
-  transcript for numbers/doses/units/laterality/negation/dates/identifiers;
-  mismatches produce clinician-review warnings, never silent edits.
+  transcript for numbers/doses/units/laterality/negation/dates/identifiers
+  (bilingual units, Jalali↔Gregorian dates, near-miss dose detection);
+  mismatches produce severity-tagged clinician-review warnings, never silent
+  edits. `10 mg`→`100 mg`, `right`→`left`, `no effusion`→`effusion` are all
+  pinned critical by the test pack.
 - **Two-step sign-off**: draft → finalized → approved only via explicit
-  clinician actions (UI and API surface both enforce).
+  clinician actions (UI and API surface both enforce); critical warnings
+  block finalize/approve until acknowledged with a recorded justification;
+  approved reports are immutable — corrections are linked amendments.
 - **Secrets server-side**: registry/router/bridge are the only places config is
   projected; client sees names, capabilities, health booleans, and policy
   manifest.
@@ -105,23 +110,26 @@ credentials arrive in Phase 7; the server answers 501 + a stable
    sandbox (no .NET SDK; network policy blocks installs) — the CI pipeline is
    the compiler: `client-linux` runs the full WPF build against the targeting
    pack and `client-windows` runs it natively with xunit. Runtime behavior
-   (window chrome, hotkeys, NAudio device handling) still needs a human pass
-   on a Windows machine.
-2. The live transcript store is an in-memory LRU (last 200 ended sessions);
-   server restart loses transcripts and encounter linkage/Persistence land in
-   Phase 7. Logout still has no revocation store.
+   (window chrome, hotkeys, NAudio device handling, the Phase 6 report/
+   templates/command screens) still needs a human pass on a Windows machine.
+2. The live transcript/template/report stores are in-memory LRUs (transcripts:
+   last 200 ended sessions; reports: 500 with approved pinned); a server
+   restart loses them. Persistence + encounter linkage land in Phase 7 — the
+   service APIs are repository-shaped seams for exactly that swap. Logout
+   still has no revocation store.
 3. Heartbeat frames are idle-timeout only (4408); explicit app-level pings +
    nginx read-timeout tuning are deferred to Phase 8.
 4. Cloud STT/LLM adapters (Deepgram/Speechmatics/OpenAI/Anthropic/Gemini)
    are verified against recorded fixtures + scripted transports, never
    against live vendor accounts (no credentials in this environment); first
    credentialed deployment should smoke `GET /api/v1/providers?probe=health`
-   and one batch transcribe + one draft per vendor.
-5. Report drafts are stateless (client-held): server-side draft storage,
-   section PATCH and finalize/approve land in Phase 6/7. `ai_requests` usage
-   rows are backfilled by the Phase 7 DB (counters carry it meanwhile).
-5. Voice-command *parsing* (Phase 6) — the catalog + protocol frames exist,
-   recognition is stubbed server-side.
+   and one batch transcribe + one draft per vendor. Template extraction is
+   likewise scripted-LLM-verified only.
+5. The Phase 6 terminology catalog is a curated starter set (~50 entries);
+   clinically-driven extension (and its DB-backed storage) continues in P7.
+   Validation is heuristic NLP (cue scopes, proximity windows) — deliberately
+   advisory-with-critical-flags, never an editor; false negatives are possible
+   and the two-step sign-off is the safety net.
 6. Cost-budget counters are in-process (a restart resets the day); durable
    usage rows land with the Phase 7 database.
 7. Observability is process-local counters; Prometheus/OTel endpoints land in

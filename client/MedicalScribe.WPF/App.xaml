@@ -11,6 +11,9 @@
             <infra:BoolToVisibilityConverter x:Key="BoolToVis"/>
             <infra:InverseBoolToVisibilityConverter x:Key="InvBoolToVis"/>
             <infra:NullToCollapsedConverter x:Key="NullToCollapsed"/>
+            <infra:SeverityToBrushConverter x:Key="SeverityBrush"/>
+            <infra:BoolToYesNoConverter x:Key="BoolToYesNo"/>
+            <infra:TemplateOriginConverter x:Key="TemplateOriginConverter"/>
         </ResourceDictionary>
     </Application.Resources>
 </Application>
