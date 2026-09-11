@@ -108,11 +108,12 @@ Notes:
   explicit "command mode" segment); ambiguous matches stay in the transcript.
 - `error.recoverable=true` ⇒ client may continue (e.g. provider fell back);
   `false` ⇒ expect close shortly.
-- Heartbeats: Phase 1 relies on TCP/WS infra + the idle-timeout close (4408);
-  Phase 2 adds explicit app-level pings — server
-  `{"v":1,"type":"heartbeat","server_time_ms":...}` every
-  `MS_WEBSOCKET__HEARTBEAT_SECONDS`, client `{"v":1,"type":"pong"}` (both will
-  be added to the v1 schema as *new* allowed types — additive, non-breaking).
+- Heartbeats: the server enforces liveness by idle timeout
+  (`MS_WEBSOCKET__HEARTBEAT_SECONDS × 3` without any frame → close 4408) and
+  accepts-but-ignores `{"v":1,"type":"pong"}` from clients. Explicit
+  app-level `heartbeat` frames are deferred to Phase 8 with nginx
+  `proxy_read_timeout` tuning; when added they will be new allowed types
+  (additive, non-breaking).
 - Provider fallback mid-session emits `warning` `code=PROVIDER_FALLBACK` with
   `details: {from, to}` and a following `session.started`-style
   `provider` field update inside `warning.details` only — session identity
@@ -120,9 +121,17 @@ Notes:
 
 ## Phase status (honesty ledger)
 
-Implemented in Phase 1: auth gate, `session.start` validation + protocol
-negotiation, router-backed provider selection, session state machine
-(pause/resume/stop), `session.completed`, audit records, error frames — all
-covered by `tests/test_ws_protocol.py`. `audio.chunk` is schema-validated but
-answered `CAPABILITY_NOT_IMPLEMENTED` until Phase 2, when `transcript.*` and
-`command.detected` frames are emitted by real provider streams.
+Phase 1: auth gate, `session.start` validation + protocol negotiation,
+router-backed provider selection, session state machine (pause/resume/stop),
+`session.completed`, audit records, error frames — `tests/test_ws_protocol.py`.
+
+Phase 2 (current): `audio.chunk` **and raw binary WS frames** feed
+`transcription_hub` → `STTProvider.stream()` → `transcript.interim/final`
+frames with stable per-utterance `segment_id`s; finals land in the in-memory
+`TranscriptStore` (served by `GET /api/v1/transcripts/{session_id}`); pause
+buffers ≤ `MS_WEBSOCKET__PAUSE_BUFFER_MS` then drops with a single
+`AUDIO_DROPPED_PAUSED` warning; queue overflow warns `AUDIO_OVERLOADED`;
+stop flushes the provider with `AUDIO`/`PROVIDER_FLUSH_TIMEOUT` guard. Covered
+by `tests/test_ws_audio_flow.py` (incl. a faulting provider →
+`PROVIDER_UNAVAILABLE` error frame). `command.detected` frames still wait for
+the Phase 6 parser; app-level heartbeat frames for Phase 8.

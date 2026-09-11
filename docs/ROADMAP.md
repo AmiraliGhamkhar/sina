@@ -4,7 +4,7 @@ Each phase: implement → tests green (`pytest`, new client tests) → build →
 docs updated → phase note appended to README table. Do not delete working
 functionality to simplify (spec §19.13).
 
-## Phase 2 — Live capture & transcript (next)
+## Phase 2 — Live capture & transcript ✅ (done — this build)
 - `client/.../Audio/NAudioCaptureService` implementing `IAudioCaptureService`
   (WASAPI, 16 kHz mono PCM16, 100 ms chunks, RMS level events; device
   hot-plug refresh).
@@ -21,7 +21,29 @@ functionality to simplify (spec §19.13).
   extended for audio path; client xunit tests for capture lifecycle +
   reconnect state machine (run on Windows CI runner — first CI job to add).
 
-## Phase 3 — STT adapters
+
+Done notes (deviations recorded honestly):
+- All items landed: `NAudioCaptureService` (WaveInEvent 16k mono, ~100 ms
+  chunks from the driver buffer, RMS level events, virtual-device-aware
+  auto-pick + `ListDevicesAsync` refresh), `WsTranscriptionClient`
+  (ClientWebSocket, binary frames, bounded 16-frame send channel with
+  drop-count, `ReconnectPolicy` 2ⁿ backoff capped 30 s × N attempts),
+  `DictationSession` coordinator, backend `transcription_hub` +
+  `TranscriptStore` + session transcript GET/PATCH endpoints, mock-STT e2e
+  in `tests/test_ws_audio_flow.py` (72 backend tests total), and
+  `client/MedicalScribe.WPF.Tests` (parser/policy/sink tests; must be run on
+  a Windows CI runner — no SDK exists in this Linux sandbox).
+- Device hot-plug: enumeration/refresh is on-demand (recorder loads devices
+  at start + manual refresh); no active MMDevice notification callback.
+- Reconnect semantics: new session id (server state is per-session), client
+  surfaces the gap via status note + `DroppedAudioFrames` counter; no
+  session-resume token (spec keeps sessions immutable).
+- Heartbeat/pong: client `pong` reserved; server pings deferred to Phase 8
+  (idle-timeout close 4408 already enforced).
+- Audio `seq`: client tracks capture sequence in `AudioChunk`; WS frames are
+  content-addressed by hub (protocol allows omitting seq on binary frames).
+
+## Phase 3 — STT adapters (next)
 - `whisper-local` (whisper-server HTTP; windowed pseudo-streaming with VAD,
   buffer/interval/silence params; fa+en language + initial prompt hotwords).
 - `qwen-asr` adapter (service HTTP/WS, fa-robust).

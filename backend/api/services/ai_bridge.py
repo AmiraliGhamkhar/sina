@@ -6,8 +6,14 @@ from the tracker), applies the server's privacy default policy, and calls the
 pure :func:`ai.router.route`. The decision object (including *why* a provider
 was selected) is what the audit log records — spec §11 "record the selected
 provider for auditing".
+
+Phase 2 addition: selection also *materializes* the provider instance so the
+WS route can hand a live :class:`~ai.base.STTProvider` straight to the
+transcription hub (registry-cached; no second construction path).
 """
 from __future__ import annotations
+
+from typing import TYPE_CHECKING
 
 from fastapi import WebSocket
 
@@ -21,6 +27,9 @@ from ai.router import (
     route,
 )
 from api.schemas.ws import SessionStart
+
+if TYPE_CHECKING:
+    from ai.base import STTProvider
 
 
 def build_candidates(app, kind: ProviderKind) -> list[ProviderCandidate]:
@@ -65,14 +74,17 @@ def stt_route_request(app, start: SessionStart) -> RouteRequest:
     )
 
 
-async def select_stt_provider(websocket: WebSocket, start: SessionStart) -> RouteDecision:
+async def select_stt_provider(
+    websocket: WebSocket, start: SessionStart
+) -> tuple[RouteDecision, STTProvider]:
+    """Return (decision, live provider). Any construction/config failure
+    propagates so the route answers ``PROVIDER_UNAVAILABLE`` before the
+    session is announced."""
     app = websocket.app
     candidates = build_candidates(app, ProviderKind.STT)
     decision = route(stt_route_request(app, start), candidates)
-    # materialize the provider instance now so config errors surface *before*
-    # session.started (the router promises a usable provider, not a hopeful name)
     settings = app.state.settings
-    app.state.ai_registry.create(
+    provider = app.state.ai_registry.create(
         ProviderKind.STT, decision.provider, settings.provider_config("stt", decision.provider)
     )
-    return decision
+    return decision, provider

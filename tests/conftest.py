@@ -17,6 +17,7 @@ def make_settings(tmp_path, **overrides) -> Settings:
         auth={"dev_token": TEST_DEV_TOKEN, "jwt_secret": TEST_JWT_SECRET},
         audit={"log_file": str(tmp_path / "audit.jsonl"), "enabled": True},
         websocket={"heartbeat_seconds": 2, "max_session_minutes": 1},
+        stt={"mock_interim_delay_s": 0.0},
     )
     base.update(overrides)
     return Settings(**base)

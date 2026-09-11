@@ -24,37 +24,46 @@ def _start(**kw) -> dict:
     return frame
 
 
+def _read_until(ws, type_name: str, limit: int = 40) -> dict:
+    """Skip interim/final/warning frames until the awaited control frame."""
+    for _ in range(limit):
+        frame = ws.receive_json()
+        if frame.get("type") == type_name:
+            return frame
+    raise AssertionError(f"frame '{type_name}' not received within {limit} frames")
+
+
 def test_session_lifecycle_with_mock_provider(client):
     with _ws(client) as ws:
         ws.send_json(_start(language="fa-en", provider="mock", privacy_required=True))
-        started = ws.receive_json()
+        started = _read_until(ws, "session.started")
         assert started["type"] == "session.started"
         assert started["protocol"] == 1
         assert started["provider"] == "mock"
         assert started["session_id"]
 
         ws.send_json({"v": 1, "type": "session.pause", "session_id": started["session_id"]})
-        assert ws.receive_json()["type"] == "session.paused"
+        assert _read_until(ws, "session.paused")["type"] == "session.paused"
 
         ws.send_json({"v": 1, "type": "session.pause"})  # illegal transition
-        err = ws.receive_json()
+        err = _read_until(ws, "error")
         assert err["type"] == "error" and err["code"] == "SESSION_STATE_INVALID"
 
         ws.send_json({"v": 1, "type": "session.resume"})
-        assert ws.receive_json()["type"] == "session.recording"
+        assert _read_until(ws, "session.recording")["type"] == "session.recording"
 
         ws.send_json({"v": 1, "type": "session.stop"})
-        done = ws.receive_json()
+        done = _read_until(ws, "session.completed")
         assert done["type"] == "session.completed"
         assert done["provider"] == "mock"
 
 
-def test_audio_chunk_accepted_shape_but_not_implemented(client):
+def test_audio_chunk_shape_validated_and_flow_started(client):
     import base64
 
     with _ws(client) as ws:
         ws.send_json(_start())
-        assert ws.receive_json()["type"] == "session.started"
+        assert _read_until(ws, "session.started")["type"] == "session.started"
         frame = {
             "v": 1,
             "type": "audio.chunk",
@@ -63,14 +72,10 @@ def test_audio_chunk_accepted_shape_but_not_implemented(client):
             "pcm16_b64": base64.b64encode(b"\x00" * 320).decode(),
         }
         ws.send_json(frame)
-        err = ws.receive_json()
-        assert err["type"] == "error"
-        assert err["code"] == "CAPABILITY_NOT_IMPLEMENTED"
-        assert err["recoverable"] is True  # connection stays usable
-
-        # malformed audio frame is a protocol error instead
+        # Phase 2: the frame is accepted; provider output flows as transcript
+        # frames (mock emits regardless of content). Malformed frames first:
         ws.send_json({"v": 1, "type": "audio.chunk", "seq": -5, "ts_ms": 0, "pcm16_b64": "!!"})
-        err2 = ws.receive_json()
+        err2 = _read_until(ws, "error")
         assert err2["code"] == "PROTOCOL_FRAME_INVALID"
 
 
@@ -108,11 +113,11 @@ def test_invalid_json_frame_survives_after_start(client):
         ws.send_json(_start())
         assert ws.receive_json()["type"] == "session.started"
         ws.send_text("{not json")
-        err = ws.receive_json()
+        err = _read_until(ws, "error")
         assert err["type"] == "error" and err["code"] == "PROTOCOL_FRAME_INVALID"
         # connection remains usable after a bad frame
         ws.send_json({"v": 1, "type": "session.stop"})
-        assert ws.receive_json()["type"] == "session.completed"
+        assert _read_until(ws, "session.completed")["type"] == "session.completed"
 
 
 def test_invalid_json_as_first_frame_closes(client):
@@ -127,9 +132,9 @@ def test_invalid_json_as_first_frame_closes(client):
 def test_unknown_message_type_replies_error(client):
     with _ws(client) as ws:
         ws.send_json(_start())
-        ws.receive_json()
+        _read_until(ws, "session.started")
         ws.send_json({"v": 1, "type": "cheese.request"})
-        err = ws.receive_json()
+        err = _read_until(ws, "error")
         assert err["type"] == "error" and "cheese.request" in err["message"]
 
 

@@ -135,3 +135,13 @@ landed are recorded in:
 
 No code was copied from reference repositories; SpeakType-derived client
 patterns carry in-file attribution headers.
+
+## Phase 2 usage log (2026-09-11)
+
+- SpeakType (MIT) — `AudioRecorder.cs`/`AudioDeviceHelper.cs` patterns adapted
+  into `client/MedicalScribe.WPF/Audio/NAudioCaptureService.cs` (WaveInEvent
+  16 kHz mono loop, RMS level math normalized to 0..1, "skip virtual devices,
+  prefer names containing mic" auto-pick — Steam hint generalized). WAV
+  writing deliberately NOT taken (STT is server-side).
+- No reference code copied for the WS client or the backend hub; both follow
+  this repo's frozen protocol doc. `frontend/` still intentionally empty.

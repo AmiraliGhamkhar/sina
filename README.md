@@ -33,7 +33,7 @@ Backend (Linux/macOS/Windows, Python 3.11+; production images use 3.12+):
 ```bash
 python -m venv .venv && .venv/bin/pip install -e ".[dev]"
 cp .env.example .env                     # set MS_AUTH__DEV_TOKEN, secrets optional in Phase 1
-.venv/bin/python -m pytest               # 65 tests: health, auth, ws protocol, router, providers
+.venv/bin/python -m pytest               # 72 tests: health, auth, ws protocol+audio flow, router, providers
 .venv/bin/python -m uvicorn api.main:app --app-dir backend --port 8000
 curl localhost:8000/health
 curl "localhost:8000/api/v1/providers?probe=health"
@@ -60,7 +60,7 @@ credentials arrive in Phase 7; the server answers 501 + a stable
 | Phase | Scope | Status |
 |---|---|---|
 | 1 | References → assessment → WPF shell → FastAPI shell → REST connectivity (+ WS **control plane**, provider contracts, compose/nginx/env) | ✅ done (this build) |
-| 2 | NAudio capture → WS audio → mock STT stream → live transcript | ⏭ next (contracts + protocol frozen) |
+| 2 | NAudio capture → WS audio → mock STT stream → live transcript (+ session transcript GET/PATCH) | ✅ done (this build) |
 | 3 | STT adapters: local whisper-server, qwen-asr, Speechmatics, Deepgram (stream+batch) | planned |
 | 4 | LLM adapters: llama-server (transport shipped in P1), OpenAI/Anthropic/Gemini + prompts | partial (P1 shipped llama-server client) |
 | 5 | Router: live health/latency/queue-depth, fallback chains (pure core + tracker shipped in P1) | partial |
@@ -99,16 +99,18 @@ credentials arrive in Phase 7; the server answers 501 + a stable
 - `docs/SOURCE_MAP.md` · `docs/THIRD_PARTY_NOTICES.md` — references & attribution
 - `docs/ROADMAP.md` — phase-by-phase remaining work with acceptance criteria
 
-## Known gaps (Phase 1 honesty)
+## Known gaps (honesty ledger)
 
-1. WPF shell cannot be compiled in this Linux sandbox (no .NET SDK; network
-   policy blocks installs) — code targets net10.0-windows and must be built
-   on Windows CI; XAML/ViewModel bindings are unverified there. Tracked as the
-   first Phase-2 CI task.
-2. `audio.chunk` is validated but answered `CAPABILITY_NOT_IMPLEMENTED`
-   (Phase 2); live transcript data flow is not wired yet.
-3. No persistence yet (Phase 7): encounters/transcripts/reports are in-memory
-   only during a WS session; logout has no revocation store.
+1. WPF client + `MedicalScribe.WPF.Tests` cannot be compiled in this Linux
+   sandbox (no .NET SDK; network policy blocks installs) — code targets
+   net10.0-windows and must be built on Windows CI; XAML/ViewModel bindings
+   and the NAudio capture loop are unverified there. First CI task:
+   `dotnet build client/MedicalScribe.sln && dotnet test`.
+2. The live transcript store is an in-memory LRU (last 200 ended sessions);
+   server restart loses transcripts and encounter linkage/Persistence land in
+   Phase 7. Logout still has no revocation store.
+3. Heartbeat frames are idle-timeout only (4408); explicit app-level pings +
+   nginx read-timeout tuning are deferred to Phase 8.
 4. Cloud STT/LLM adapters (Phase 3/4) and the router's live latency/queue
    signals (Phase 5) are interface-ready but unimplemented.
 5. Voice-command *parsing* (Phase 6) — the catalog + protocol frames exist,

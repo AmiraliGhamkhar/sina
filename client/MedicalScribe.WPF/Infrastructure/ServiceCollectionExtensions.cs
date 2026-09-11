@@ -33,7 +33,10 @@ public static class ServiceCollectionExtensions
 
         services.AddSingleton<IAuthorizationService, AuthorizationService>();
         services.AddSingleton<IServerStatusService, ServerStatusService>();
-        services.AddSingleton<IAudioCaptureService, UnavailableAudioCaptureService>();
+        services.AddSingleton<IAudioCaptureService, NAudioCaptureService>();
+        services.AddSingleton(new ReconnectPolicy(maxAttempts: settingsStore.Current.ReconnectMaxAttempts));
+        services.AddSingleton<ITranscriptionStream, WsTranscriptionClient>();
+        services.AddSingleton<DictationSession>();
         services.AddSingleton<IHotkeyService, Win32HotkeyService>();
 
         services.AddSingleton<LoginViewModel>();
@@ -41,6 +44,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<PatientEncounterViewModel>();
         services.AddSingleton<RecorderViewModel>();
         services.AddSingleton<LiveTranscriptViewModel>();
+        services.AddSingleton<ILiveTranscriptSink>(sp => sp.GetRequiredService<LiveTranscriptViewModel>());
         services.AddSingleton<MedicalEditorViewModel>();
         services.AddSingleton<ReportViewModel>();
         services.AddSingleton<TemplatesViewModel>();

@@ -19,6 +19,10 @@ public sealed class AppSettings
 
     // Audio (device id from WASAPI endpoint; empty = system default)
     public string MicrophoneId { get; set; } = "";
+
+    // Dictation stream policy (client-side knobs; server may cap them)
+    public bool PrivacyRequired { get; set; } // pin to privacy-safe providers
+    public int ReconnectMaxAttempts { get; set; } = 5;
     public bool AutoStartTranscription { get; set; }
 
     // Hotkeys (parse format: modifier combinations joined with '+', e.g. "Ctrl+Alt+Space")

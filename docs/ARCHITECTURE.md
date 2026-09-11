@@ -98,11 +98,12 @@ spec §11 "record the selected provider for auditing".
 ## 5. Data flow (dictation session)
 
 ```
-mic (NAudio WASAPI, 16k mono PCM16)                    [P2]
+mic (NAudio WASAPI, 16k mono PCM16)                    [done P2]
   → WS binary frames / audio.chunk                     → api/routes/ws
-  → session buffer → ai_bridge route() → STTProvider.stream()
-  → TranscriptSegment frames (interim/final)           → live transcript view
-  → final segments stored (Transcript/Segment tables)  [P7]
+  → transcription_hub queue → ai_bridge route() → STTProvider.stream()
+  → transcript.interim/final frames                    → live transcript view
+  → final segments in TranscriptStore (in-mem LRU)     [done P2]
+  → Transcript/Segment tables                          [P7]
   → edits (clinician) / voice commands (parser, P6)
   → POST report draft: LLMProvider via prompt built from
     transcript + template + context ONLY (grounding, §7)
@@ -175,14 +176,16 @@ Postgres-first, Redis never the source of truth.
   endpoint in Phase 8: `http_requests_total{route,status}`,
   `ws_connections_active`, `stt_latency_ms`, `llm_latency_ms`,
   `provider_errors_total{provider}`, `provider_queue_depth`,
-  `tokens_total{provider,model}`, `transcription_audio_seconds_total`.
+  `tokens_total{provider,model}`, `transcription_audio_seconds_total`,
+  and (P2) `ws_audio_frames`, `stt_segments_final`, `stt_first_segment_ms`,
+  `stt_streams_started/stopped`, `stt_audio_dropped_bytes_frames`.
 - Every AI request is written to `ai_requests` (P7) so latency/cost/provider
   audits are queryable, not just observable.
 
 ## 10. WebSocket protocol
 
 Versioned envelope (v1), strict inbound validation, control-plane implemented
-in Phase 1, audio pipeline in Phase 2. Normative spec:
+in Phase 1, audio pipeline + transcript store in Phase 2. Normative spec:
 `docs/WEBSOCKET_PROTOCOL.md`; schemas: `backend/api/schemas/ws.py`;
 conformance tests: `tests/test_ws_protocol.py`.
 

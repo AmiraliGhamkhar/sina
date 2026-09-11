@@ -15,13 +15,15 @@ public sealed partial class RecorderViewModel : ObservableObject, IDisposable
 {
     private readonly IAudioCaptureService _capture;
     private readonly IServerStatusService _status;
+    private readonly DictationSession _dictation;
     private readonly Stopwatch _watch = new();
     private readonly System.Timers.Timer _tick;
 
-    public RecorderViewModel(IAudioCaptureService capture, IServerStatusService status)
+    public RecorderViewModel(IAudioCaptureService capture, IServerStatusService status, DictationSession dictation)
     {
         _capture = capture;
         _status = status;
+        _dictation = dictation;
 
         _capture.StateChanged += (_, state) => OnUi(() => OnCaptureStateChanged(state));
         _capture.LevelChanged += (_, level) => OnUi(() => AudioLevel = level);
@@ -131,7 +133,7 @@ public sealed partial class RecorderViewModel : ObservableObject, IDisposable
             }
             return features.LiveTranscription
                 ? "Live transcription enabled by server policy."
-                : "Live transcription arrives in Phase 2 — the recorder state machine is active now.";
+                : "Server has live transcription disabled for this deployment.";
         }
     }
 
@@ -170,20 +172,27 @@ public sealed partial class RecorderViewModel : ObservableObject, IDisposable
     private async Task StartAsync()
     {
         LastError = null;
-        await _capture.StartAsync(SelectedMicrophone?.Id ?? "", CancellationToken.None);
+        // stream first, mic second — handled inside DictationSession so no
+        // captured audio is sent before session.started exists
+        var ok = await _dictation.StartAsync(SelectedMicrophone?.Id ?? "", CancellationToken.None);
+        if (!ok && State == CaptureState.Idle)
+        {
+            // capture never started; reflect it instead of spinning in Starting
+            LastError = "dictation stream unavailable — check server connection";
+        }
     }
 
     [RelayCommand(CanExecute = nameof(CanStop))]
     private async Task StopAsync()
     {
-        await _capture.StopAsync();
+        await _dictation.StopAsync();
     }
 
     [RelayCommand(CanExecute = nameof(CanPause))]
-    private void Pause() => _capture.Pause();
+    private async Task PauseAsync() => await _dictation.PauseAsync();
 
     [RelayCommand(CanExecute = nameof(CanResume))]
-    private void Resume() => _capture.Resume();
+    private async Task ResumeAsync() => await _dictation.ResumeAsync();
 
     /// <summary>Bound to the global hotkey (MainViewModel) and F9.</summary>
     public void ToggleRecording()

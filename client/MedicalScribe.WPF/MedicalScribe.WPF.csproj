@@ -20,6 +20,9 @@
   <ItemGroup>
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="9.0.8" />
+    <!-- Windows audio capture (WASAPI/MME). Kept client-side per SpeakType reference;
+         STT itself is server-side — the client only produces PCM16 chunks. -->
+    <PackageReference Include="NAudio" Version="2.2.1" />
   </ItemGroup>
 
 </Project>

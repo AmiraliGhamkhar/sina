@@ -7,10 +7,11 @@ using System.Text;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using MedicalScribe.WPF.Models;
+using MedicalScribe.WPF.Services;
 
 namespace MedicalScribe.WPF.ViewModels;
 
-public sealed partial class LiveTranscriptViewModel : ObservableObject
+public sealed partial class LiveTranscriptViewModel : ObservableObject, ILiveTranscriptSink
 {
     [ObservableProperty]
     private string _interimText = "";
@@ -22,7 +23,7 @@ public sealed partial class LiveTranscriptViewModel : ObservableObject
     private TranscriptSegmentEntry? _selectedSegment;
 
     [ObservableProperty]
-    private string _statusNote = "waiting for stream (live feed lands in Phase 2)";
+    private string _statusNote = "idle — start a dictation from the recorder screen";
 
     public ObservableCollection<TranscriptSegmentEntry> Segments { get; } = [];
 
@@ -59,6 +60,8 @@ public sealed partial class LiveTranscriptViewModel : ObservableObject
     }
 
     public void AddWarning(TranscriptWarning warning) => Warnings.Add(warning);
+
+    public void SetStatusNote(string note) => StatusNote = note;
 
     public void ClearTranscript()
     {

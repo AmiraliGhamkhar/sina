@@ -1,13 +1,15 @@
 """REST surface tests: health, version, manifest, stats."""
 from __future__ import annotations
 
+from api.version import PHASE
+
 
 def test_health(client):
     resp = client.get("/health")
     assert resp.status_code == 200
     body = resp.json()
     assert body["status"] == "ok"
-    assert body["phase"] == 1
+    assert body["phase"] == PHASE
 
 
 def test_readiness_components_report_disabled_without_db(client):
@@ -44,7 +46,7 @@ def test_version(client):
     body = resp.json()
     assert body["api_version"]
     assert body["ws_protocol"] == 1
-    assert body["phase"] == 1
+    assert body["phase"] == PHASE
 
 
 def test_manifest_is_data_driven_and_phase_honest(client):
@@ -60,8 +62,8 @@ def test_manifest_is_data_driven_and_phase_honest(client):
     assert {"new_paragraph", "delete_last_sentence", "finalize_section"} <= command_ids
     fa_trigger = next(c for c in body["voice_commands"] if c["id"] == "new_paragraph")
     assert "پاراگراف جدید" in fa_trigger["triggers"]
-    # Phase 1 must honestly report live transcription as off
-    assert body["features"]["live_transcription"] is False
+    # Phase 2 switched the live pipeline on (flag must follow the server)
+    assert body["features"]["live_transcription"] is True
     assert body["ws_path"] == "/ws/v1/transcribe"
     assert body["max_message_bytes"] > 0
 

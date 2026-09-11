@@ -109,6 +109,8 @@ class DeepgramConfig(BaseModel):
 
 class SttConfig(BaseModel):
     default_provider: str = "mock"
+    #: per-interim pacing for the mock provider (dev demo realism; tests use 0)
+    mock_interim_delay_s: float = 0.05
     whisper_server: WhisperServerConfig = Field(default_factory=WhisperServerConfig)
     qwen_asr: QwenAsrConfig = Field(default_factory=QwenAsrConfig)
     speechmatics: SpeechmaticsConfig = Field(default_factory=SpeechmaticsConfig)
@@ -131,6 +133,10 @@ class WebsocketConfig(BaseModel):
     max_message_bytes: int = 1_048_576  # 1 MiB control or audio frame
     heartbeat_seconds: int = 30
     max_session_minutes: int = 120
+    # Phase 2 — audio pipeline
+    pause_buffer_ms: int = 2000
+    provider_flush_timeout_s: float = 10.0
+    audio_queue_maxsize: int = 512
 
 
 class AuditConfig(BaseModel):
@@ -184,7 +190,7 @@ class Settings(BaseSettings):
         if kind == "llm" and name == "mock":
             return {}
         if kind == "stt" and name == "mock":
-            return {}
+            return {"interim_delay_s": self.stt.mock_interim_delay_s}
         return {}
 
 

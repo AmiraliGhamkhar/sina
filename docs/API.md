@@ -39,10 +39,22 @@ data must not echo back through error paths).
 | GET | `/api/v1/providers?kind=stt|llm&probe=health` | optional | registry listing: `{name, kind, description, configured, capabilities{privacy_class,...}, health?}` |
 | GET | `/api/v1/observability/stats` | optional | process metrics snapshot (Prometheus endpoint: P8) |
 
+## Transcripts (live session store — landed in Phase 2)
+
+In-memory only until Phase 7 persistence; last 200 ended sessions are kept
+(LRU, ended sessions evicted first), current sessions readable while open.
+
+| Method | Path | Auth | Notes |
+|---|---|---|---|
+| GET | `/api/v1/transcripts/{session_id}` | optional | `TranscriptResponse{session_id, provider, language, status(open\|completed), segment_count, audio_duration_ms, segments[]}` where each segment is `{segment_id, text, start_ms, end_ms, language, confidence, edited, revision, updated_at}`. 404 `NOT_FOUND` for unknown sessions. |
+| PATCH | `/api/v1/transcripts/{session_id}/segments/{segment_id}` | optional | body `{text}` (≤8000 chars) → `{segment_id, revision, edited, updated_at}`. Identical text is a no-op (revision unchanged). Audited without content. |
+
+These expose what the WS stream finalized; interim frames are never stored.
+
 ## Planned (contract frozen in phase docs)
 
 - `POST /api/v1/patients/search`, `POST /api/v1/encounters` — P7
-- `GET/POST /api/v1/transcripts/{encounter_id}` (+ segment patches) — P2/P7
+- encounter-scoped transcript/report APIs (`/api/v1/transcripts?encounter_id=…`) — P7 (session-scoped live API already shipped in P2)
 - `POST /api/v1/transcribe/batch` (multipart audio; Deepgram/whisper-style) — P3
 - `POST /api/v1/report-templates` (+ `POST /report-templates/extract-from-example`) — P6
 - `POST /api/v1/reports/{encounter_id}/draft` → `PATCH .../sections` → `POST .../finalize` → `POST .../approve` — P6/P7 (two-step sign-off is non-negotiable)
