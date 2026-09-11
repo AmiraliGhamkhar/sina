@@ -1,14 +1,13 @@
 # models/
 
 Local model weights referenced by *server-side* providers (GGUF for
-llama-server, faster-whisper/ONNX for local STT). **Never committed** —
-`.gitignore` excludes `*.gguf*`, `*.bin`, `*.onnx`, `*.safetensors`, …
+llama-server/whisper-server, ONNX for in-process STT/NER). **Never committed**
+— `.gitignore` excludes `*.gguf*`, `*.bin`, `*.onnx`, `*.safetensors`, …
 
-| Model | Where it's used | License note |
-|---|---|---|
-| Llama/Qwen GGUF (e.g. qwen2.5-14b-instruct-q5) | llama-server container (`--profile llm`) | per-model license (check before redistribution) |
-| Whisper large-v3 / distil | whisper-server (Phase 3) | MIT (whisper weights) |
+Downloads are managed by the model hub (admin action from the WPF client's
+**AI Models** screen or `POST /api/v1/models/{id}/download`): streamed from
+pinned HuggingFace sources, sha256-verified, auto-configured where possible.
+Catalog, licenses, and service wiring: `docs/MODELS.md`.
 
-Download scripts land in Phase 3/8 (`scripts/fetch-models.ps1`, checksum
-verified). Model choice is a deployment decision documented per site; the
-application only stores *paths* in configuration.
+Local convention: model choice is a deployment decision documented per site;
+the application only stores *paths* in configuration.

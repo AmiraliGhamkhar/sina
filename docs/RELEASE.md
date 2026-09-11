@@ -1,15 +1,15 @@
-# Release checklist (Phase 8)
+# Release checklist
 
-This is the operational runbook for cutting a MedicalScribe release. Every
-step is either executable from this repo or explicitly calls out what needs
-a Windows machine / production credentials.
+Operational runbook for cutting a MedicalScribe release. Every step is either
+executable from this repo or explicitly calls out what needs a Windows machine
+/ production credentials.
 
 ## 1. Code gates (automated)
 
 - [ ] CI green on the release commit: backend (pytest on **real PostgreSQL +
       Redis services** + ruff, both Python 3.11/3.12), client-linux,
-      client-windows (build + xunit), docker, secret scan (gitleaks, full
-      history), pip-audit with no unreviewed findings.
+      client-windows (build + xunit), client-publish, docker, secret scan
+      (gitleaks, full history), pip-audit with no unreviewed findings.
 - [ ] `python -m pytest` locally: full suite green (sqlite mode) — the CI run
       additionally exercises PostgreSQL + Redis.
 - [ ] Migration round-trip on a production-shape database:
@@ -22,35 +22,37 @@ a Windows machine / production credentials.
 - [ ] `pip-audit --skip-editable` clean (or every finding triaged + accepted
       in writing).
 - [ ] gitleaks clean on full history (config: `.gitleaks.toml`).
-- [ ] Production env review (docs/SECURITY.md checklist): `MS_SERVER__ENV=
-      production`, JWT secret ≥ 32 bytes rotated for the release,
-      `MS_AUTH__DEV_TOKEN` unset, `MS_SECURITY__SECRET_ENCRYPTION_KEY` set and
-      backed up (provider secrets are unrecoverable without it),
+- [ ] Production env review (docs/SECURITY.md checklist):
+      `MS_SERVER__ENV=production`, JWT secret ≥ 32 bytes rotated for the
+      release, `MS_AUTH__DEV_TOKEN` unset,
+      `MS_SECURITY__SECRET_ENCRYPTION_KEY` set and backed up (provider
+      secrets are unrecoverable without it),
       `MS_AUTH__BOOTSTRAP_ADMIN_PASSWORD` unset after first boot.
 - [ ] Gateway pen-test checklist walked (docs/SECURITY.md §Pen-test).
 
 ## 3. Server release
 
-- [ ] Build image: `docker build -f infrastructure/docker/Dockerfile.api -t
-      medicalscribe-api:{{VERSION}} .`
+- [ ] Build image:
+      `docker build -f infrastructure/docker/Dockerfile.api -t medicalscribe-api:{{VERSION}} .`
 - [ ] Apply migrations **before** starting the new image
       (`MS_DATABASE__AUTO_CREATE=false` in production).
-- [ ] Roll out behind nginx; verify `/health` → 200, `/health/ready` → 200
-      with `postgres: ok`, one WS dictation session end-to-end (mock or a
-      real provider), `/metrics` scraped by Prometheus (monitoring profile:
+- [ ] Roll out behind nginx; verify `/health` → 200, `/health/ready` → 200,
+      one WS dictation session end-to-end (mock or a real provider),
+      `/metrics` scraped by Prometheus (monitoring profile:
       `docker compose --profile monitoring up`).
-- [ ] Watch the dashboard for 24 h: `medicalscribe_transcript_db_write_
-      failures_total`, `medicalscribe_http_rate_limited_total`, provider
-      health panels (docs/DEPLOYMENT.md §Ops).
+- [ ] Watch the dashboard for 24 h: `medicalscribe_transcript_db_write_failures_total`,
+      `medicalscribe_http_rate_limited_total`, provider health panels
+      (docs/DEPLOYMENT.md §Operations).
 
 ## 4. Windows client packaging
 
-**Default path — self-contained exe via CI (no Windows machine needed).** Push a
-`v*` tag; `.github/workflows/release.yml` rebuilds the client from the tagged
-commit, produces `MedicalScribe-win-x64.zip` (single-file, self-contained —
-runs on Windows 10+ x64 with no .NET install) plus `sha256.txt`, and attaches
-both to the GitHub Release. Every push also builds the same artifact as the
-`client-publish` CI job (artifact `MedicalScribe-win-x64`).
+**Default path — self-contained exe via CI (no Windows machine needed).**
+Push a `v*` tag; `.github/workflows/release.yml` rebuilds the client from the
+tagged commit, produces `MedicalScribe-win-x64.zip` (single-file,
+self-contained — runs on Windows 10+ x64 with no .NET install) plus
+`sha256.txt`, and attaches both to the GitHub Release. Every push also builds
+the same artifact as the `client-publish` CI job (artifact
+`MedicalScribe-win-x64`).
 
 1. [ ] CI green on the tagged commit (backend + client-windows + docker).
 2. [ ] `git tag vX.Y.Z && git push origin vX.Y.Z` — release workflow runs.
@@ -63,7 +65,7 @@ both to the GitHub Release. Every push also builds the same artifact as the
 
 **Opt-in path — signed MSIX (auto-update).** MSIX packaging and signing cannot
 be produced from Linux CI (makeappx / SignTool are Windows tools); this stays
-the manual step for clinics that want silent auto-updates:
+the manual step for clinics that want silent auto-updates.
 
 1. On a Windows 10/11 machine with the .NET 10 SDK:
    `dotnet publish client/MedicalScribe.WPF -c Release -r win-x64`
@@ -79,8 +81,8 @@ the manual step for clinics that want silent auto-updates:
    (auto-update policy: hourly checks, silent install) to the clinic HTTPS
    update host.
 
-Signing + MSIX on the CI Windows runner remains open (see honesty ledger in
-README) — it needs one iteration with the real certificate artifacts.
+Signing + MSIX on the CI Windows runner remains open — it needs one iteration
+with the real certificate artifacts.
 
 ## 5. Regulatory-boundary language (every release)
 
@@ -91,13 +93,12 @@ README) — it needs one iteration with the real certificate artifacts.
 - [ ] No claim of clinical validation/certification anywhere in the product
       surface.
 - [ ] Privacy defaults intact: `privacy_required=true` default; cloud
-      providers never receive PHI-scrubbed-but-identifiable data from
-      privacy-required encounters (tested invariant).
+      providers never receive PHI from privacy-required encounters (tested
+      invariant).
 
 ## 6. After the release
 
-- [ ] Tag the commit; note the tag in the deployment log with the image
-      digest.
+- [ ] Tag the commit; note the tag in the deployment log with the image digest.
 - [ ] Archive the release audit log slice (`audit_log` table + JSONL) per
       retention policy.
 - [ ] File follow-ups for anything skipped in this run.

@@ -1,170 +1,85 @@
-# Source Reference Map
+# Source reference map
 
-This project uses the following open-source repositories as
-architecture/reference sources.
+This project is clean-room inspired by four open-source repositories, vendored
+at the repository root as **read-only reference checkouts**. No source file
+was copied verbatim; adapted patterns are marked where they occur
+(`docs/THIRD_PARTY_NOTICES.md` is the attribution index).
 
-## SpeakType
-Path:
-../speaktype
+## References
 
-Primary reference:
-src/SpeakType.Core/
+| Reference (license) | Checkout | Primary reference (relative to checkout) |
+|---|---|---|
+| SpeakType (MIT) | `speaktype/` | `src/SpeakType.Core/` |
+| Phlox (MIT) | `phlox/` | `server/api/`, `server/nlp_tools/`, `server/llm_client/` |
+| Open Medical Scribe (MIT) | `open-medical-scribe/` | `src/providers/`, `src/services/` |
+| Multi-Model-Gateway (MIT) | `Multi-Model-Gateway/` | `backend/app/services/`, `backend/app/core/`, `backend/app/middleware/` |
 
-Relevant files:
-- AppSettings.cs
-- AudioDeviceHelper.cs
-- AudioRecorder.cs
-- AudioService.cs
-- FileLogger.cs
-- HotkeyService.cs
-- IAudioRecorder.cs
-- IAudioService.cs
-- IHotkeyService.cs
-- ILogger.cs
-- IWhisperTranscriber.cs
-- InputSender.cs
-- SettingsStore.cs
-- WhisperTranscriber.cs
+### SpeakType
 
-Purpose:
-WPF audio recording, microphone handling, hotkeys and desktop interaction.
+WPF audio recording, microphone handling, hotkeys, desktop interaction.
 
-## Phlox
-Path:
-../phlox
+Relevant files (`speaktype/src/SpeakType.Core/`):
+`AppSettings.cs`, `AudioDeviceHelper.cs`, `AudioRecorder.cs`,
+`AudioService.cs`, `FileLogger.cs`, `HotkeyService.cs`, `IAudioRecorder.cs`,
+`IAudioService.cs`, `IHotkeyService.cs`, `ILogger.cs`,
+`IWhisperTranscriber.cs`, `InputSender.cs`, `SettingsStore.cs`,
+`WhisperTranscriber.cs`.
 
-Primary reference:
-server/api/
-server/nlp_tools/
-server/llm_client/
+### Phlox
 
-Relevant files:
-- server/api/chat.py
-- server/api/patient.py
-- server/api/templates.py
-- server/api/transcribe.py
-- server/api/audit.py
-- server/nlp_tools/adaptive_refinement.py
-- server/nlp_tools/document_processing.py
-- server/nlp_tools/summarization_manager.py
-- server/nlp_tools/templates.py
-- server/llm_client/client.py
-- server/llm_client/utils.py
+Medical report workflow, FastAPI patterns, templates, transcription, LLM
+integration concepts.
 
-Purpose:
-Medical report workflow, FastAPI patterns, templates, transcription
-and LLM integration concepts.
+Relevant files (`phlox/server/`): `api/chat.py`, `api/patient.py`,
+`api/templates.py`, `api/transcribe.py`, `api/audit.py`,
+`nlp_tools/adaptive_refinement.py`, `nlp_tools/document_processing.py`,
+`nlp_tools/summarization_manager.py`, `nlp_tools/templates.py`,
+`llm_client/client.py`, `llm_client/utils.py`.
 
-## Open Medical Scribe
-Path:
-../open-medical-scribe
+### Open Medical Scribe
 
-Primary reference:
-src/providers/
-src/services/
+Provider abstraction, local/cloud/hybrid architecture, streaming
+transcription, privacy, audit, medical note orchestration.
 
-Relevant files:
-- src/providers/transcription/index.js
-- src/providers/transcription/streamIndex.js
-- src/providers/transcription/resultAdapter.js
-- src/providers/transcription/whisperCppProvider.js
-- src/providers/transcription/whisperOnnxProvider.js
-- src/providers/transcription/whisperStreamProvider.js
-- src/providers/transcription/deepgramProvider.js
-- src/providers/transcription/deepgramStreamProvider.js
-- src/providers/transcription/openAiProvider.js
-- src/providers/note/index.js
-- src/providers/note/ollamaProvider.js
-- src/providers/note/openAiProvider.js
-- src/providers/note/anthropicProvider.js
-- src/providers/note/geminiProvider.js
-- src/services/auditLogger.js
-- src/services/privacy.js
-- src/services/promptBuilder.js
-- src/services/scribeService.js
-- src/services/soapFormatter.js
-- src/services/transcriptArtifacts.js
+Relevant files (`open-medical-scribe/src/`):
+`providers/transcription/index.js`, `providers/transcription/streamIndex.js`,
+`providers/transcription/resultAdapter.js`,
+`providers/transcription/whisperCppProvider.js`,
+`providers/transcription/whisperOnnxProvider.js`,
+`providers/transcription/whisperStreamProvider.js`,
+`providers/transcription/deepgramProvider.js`,
+`providers/transcription/deepgramStreamProvider.js`,
+`providers/transcription/openAiProvider.js`, `providers/note/index.js`,
+`providers/note/ollamaProvider.js`, `providers/note/openAiProvider.js`,
+`providers/note/anthropicProvider.js`, `providers/note/geminiProvider.js`,
+`services/auditLogger.js`, `services/privacy.js`, `services/promptBuilder.js`,
+`services/scribeService.js`, `services/soapFormatter.js`,
+`services/transcriptArtifacts.js`.
 
-Purpose:
-Provider abstraction, local/cloud/hybrid architecture,
-streaming transcription, privacy, audit and medical note orchestration.
+### Multi-Model-Gateway
 
-## Multi-Model-Gateway
-Path:
-../Multi-Model-Gateway
+Provider routing, authentication, Redis, queueing, rate limiting,
+observability concepts.
 
-Primary reference:
-backend/app/services/
-backend/app/core/
-backend/app/middleware/
+Relevant files (`Multi-Model-Gateway/backend/app/`):
+`services/provider_registry.py`, `services/provider_router.py`,
+`services/router.py`, `services/fit_score.py`, `core/config.py`,
+`core/security.py`, `core/redis.py`, `core/queue.py`, `core/metrics.py`,
+`core/stream_guard.py`, `middleware/ratelimit.py`.
 
-Relevant files:
-- backend/app/services/provider_registry.py
-- backend/app/services/provider_router.py
-- backend/app/services/router.py
-- backend/app/services/fit_score.py
-- backend/app/core/config.py
-- backend/app/core/security.py
-- backend/app/core/redis.py
-- backend/app/core/queue.py
-- backend/app/core/metrics.py
-- backend/app/core/stream_guard.py
-- backend/app/middleware/ratelimit.py
+## Usage rules
 
-Purpose:
-Provider routing, authentication, Redis, queueing,
-rate limiting and observability concepts.
+- These repositories are **reference implementations only**.
+- Do not blindly copy their architecture.
+- Do not preserve their UI/framework choices when they conflict with this
+  project's architecture.
+- Do not copy code without preserving the applicable license/attribution.
 
-IMPORTANT:
-These repositories are reference implementations only.
-Do not blindly copy their architecture.
-Do not preserve their UI/framework choices when they conflict
-with this project's architecture.
-Do not copy code without preserving the applicable license/attribution.
----
+## Usage log (per phase)
 
-## Phase 1 usage log (2026-09-10)
-
-This map was followed during the Phase 1 inspection. Per-reference take/leave
-decisions, conflict resolutions, and the exact files where adapted concepts
-landed are recorded in:
-
-- `docs/ASSESSMENT.md` — analysis + implementation order
-- `docs/THIRD_PARTY_NOTICES.md` — attribution index (all four references are MIT)
-- `docs/ARCHITECTURE.md` — target design (only reference *patterns* survive here)
-
-No code was copied from reference repositories; SpeakType-derived client
-patterns carry in-file attribution headers.
-
-## Phase 2 usage log (2026-09-11)
-
-- SpeakType (MIT) — `AudioRecorder.cs`/`AudioDeviceHelper.cs` patterns adapted
-  into `client/MedicalScribe.WPF/Audio/NAudioCaptureService.cs` (WaveInEvent
-  16 kHz mono loop, RMS level math normalized to 0..1, "skip virtual devices,
-  prefer names containing mic" auto-pick — Steam hint generalized). WAV
-  writing deliberately NOT taken (STT is server-side).
-- No reference code copied for the WS client or the backend hub; both follow
-  this repo's frozen protocol doc. `frontend/` still intentionally empty.
-
-## Phase 3 usage log (2026-09-11)
-
-- No reference code copied. Adapter *patterns* follow the frozen contracts in
-  `ai/base.py` (per ASSESSMENT §2: whisper-server stays an EXTERNAL service —
-  no spawning, no SDK-embedded inference; cloud traffic only from the
-  backend). The Deepgram/Speechmatics wire formats are implemented from their
-  public protocol shapes and pinned by fixture tests in `tests/fixtures/`
-  rather than live accounts.
-- openai-compat HTTP plumbing for qwen-asr mirrors the llama-server pattern
-  already in `ai/llm/openai_compat.py` (same repo module, not a reference one).
-
-## Phase 4 usage log (2026-09-11)
-
-- Phlox (MIT) — the *strict-JSON + repair round-trip* idea for structured note
-  output informed `api/services/note_prompt.py` (message shape + fail-closed
-  after one attempt). No code copied; prompt contract, sentinels, fidelity
-  check and provider adapters are this repo's own.
-- open-medical-scribe (MIT) — mock-provider-parity rule followed: the mock
-  LLM now satisfies the same grounding contract as real providers so the
-  pipeline is honest end-to-end without keys.
-- Cloud LLM wires (OpenAI/Anthropic/Gemini) implemented from public API
-  shapes, fixture-verified; SDKs deliberately avoided (httpx-only rule).
+| Phase | Usage |
+|---|---|
+| 1 (2026-09-10) | Full inspection per the map above. Per-reference take/leave decisions, conflict resolutions, and the exact files where adapted concepts landed: `docs/ASSESSMENT.md`. Attribution index: `docs/THIRD_PARTY_NOTICES.md` (all four references are MIT). Target design: `docs/ARCHITECTURE.md`. No code was copied; SpeakType-derived client patterns carry in-file attribution headers. |
+| 2 (2026-09-11) | SpeakType (MIT) — `AudioRecorder.cs`/`AudioDeviceHelper.cs` patterns adapted into `client/MedicalScribe.WPF/Audio/NAudioCaptureService.cs` (WaveInEvent 16 kHz mono loop, RMS level math normalized to 0..1, "skip virtual devices, prefer names containing mic" auto-pick). WAV writing deliberately NOT taken (STT is server-side). No reference code copied for the WS client or the backend hub; both follow this repo's frozen protocol doc. |
+| 3 (2026-09-11) | No reference code copied. Adapter *patterns* follow the frozen contracts in `ai/base.py` (per ASSESSMENT §2: whisper-server stays an EXTERNAL service — no spawning, no SDK-embedded inference; cloud traffic only from the backend). Deepgram/Speechmatics wire formats implemented from their public protocol shapes and pinned by fixture tests in `tests/fixtures/` rather than live accounts. openai-compat HTTP plumbing for qwen-asr mirrors the llama-server pattern already in `ai/llm/openai_compat.py` (same repo module, not a reference one). |
+| 4 (2026-09-11) | Phlox (MIT) — the *strict-JSON + repair round-trip* idea for structured note output informed `api/services/note_prompt.py` (message shape + fail-closed after one attempt). No code copied; prompt contract, sentinels, fidelity check and provider adapters are this repo's own. Open Medical Scribe (MIT) — mock-provider-parity rule followed: the mock LLM satisfies the same grounding contract as real providers so the pipeline is honest end-to-end without keys. Cloud LLM wires (OpenAI/Anthropic/Gemini) implemented from public API shapes, fixture-verified; SDKs deliberately avoided (httpx-only rule). |
