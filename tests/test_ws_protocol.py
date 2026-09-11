@@ -151,7 +151,13 @@ def test_audit_records_session_with_selected_provider(client, tmp_path):
         ws.send_json(_start(provider="mock"))
         ws.receive_json()
         ws.send_json({"v": 1, "type": "session.stop"})
-        ws.receive_json()
+        # the mock may have transcript frames queued ahead of `completed`;
+        # drain until the real end-of-session frame so the assert below can
+        # never race the server's audit emit (CI flake, fixed in P5)
+        for _ in range(40):
+            frame = ws.receive_json()
+            if frame.get("type") == "session.completed":
+                break
     audit_file = tmp_path / "audit.jsonl"
     lines = [json.loads(raw) for raw in audit_file.read_text().splitlines()]
     started = [rec for rec in lines if rec["event"] == "session_started"]

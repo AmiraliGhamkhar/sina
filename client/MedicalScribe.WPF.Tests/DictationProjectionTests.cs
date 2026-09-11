@@ -85,7 +85,9 @@ public class DictationProjectionTests
         var vm = new LiveTranscriptViewModel();
         DictationSession.ProjectEvent(new WsFinalEvent("الف", "s1", 0, 10, null, null), vm);
         DictationSession.ProjectEvent(new WsFinalEvent("ب", "s2", 10, 20, null, null), vm);
-        Assert.Equal("الف\n\nب", vm.FullText);
+        // the VM joins with Environment.NewLine (correct for a WPF TextBox);
+        // the test must assert the same contract on every OS, not \n literals
+        Assert.Equal("الف" + Environment.NewLine + Environment.NewLine + "ب", vm.FullText);
     }
 
     [Fact]
