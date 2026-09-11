@@ -88,7 +88,17 @@ jobs:
       - name: Dependency audit (pip-audit)
         run: |
           pip install pip-audit
-          pip-audit --skip-editable
+          pip-audit --skip-editable 2>&1 | tee pip-audit.log
+
+      - name: Mirror pip-audit failure into annotation
+        if: failure()
+        run: |
+          python - <<'EOF'
+          import pathlib
+          tail = pathlib.Path("pip-audit.log").read_text(errors="replace")[-3800:]
+          ann = tail.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A").replace("|", "%7C")
+          print(f"::error file=pip-audit.log::{ann}")
+          EOF
 
       # The sandboxed dev environment cannot fetch Actions blob logs, so every
       # failing step mirrors its tail into a check-run annotation (readable via
