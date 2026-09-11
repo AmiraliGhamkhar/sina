@@ -1,6 +1,6 @@
 # MedicalScribe Architecture
 
-Status: Phase 6 implemented · Target: production-oriented medical STT +
+Status: Phase 7 implemented · Target: production-oriented medical STT +
 clinical documentation platform.
 
 ## 1. System shape
@@ -190,17 +190,25 @@ config only. Redis holds rate-limit buckets, queues, transient session state
 and provider health (shared across workers); anything durable is
 Postgres-first, Redis never the source of truth.
 
-## 8. AuthN/AuthZ
+## 8. AuthN/AuthZ (implemented in Phase 7)
 
-- JWT access (short TTL) + opaque-stored refresh rotation (Phase 7), argon2
-  password hashing, `Role`-based authorization with policies: clinicians
-  read/write own encounters; auditors read-only; admins manage providers.
-- WS auth = same JWT (query param `token` for browsers, Authorization header
-  for WPF) validated before protocol handshake; dev static token is
-  non-production only.
-- Provider secrets: `ai_providers.key_encrypted` (Fernet key from
-  `MS_SECURITY__KEY_ENCRYPTION_KEY`, MMG concept) — masked as `****last4` in
-  every response (registry `description` fields carry no values).
+- JWT access (30 min default) + **one-time** refresh tokens (14 d): hash-stored
+  in `refresh_tokens`, consumed atomically on rotation; presenting a consumed
+  token again (theft assumption) revokes ALL of that user's sessions. Argon2id
+  password hashing with a dummy-hash timing equalizer for unknown users;
+  per-username lockout (5 failures → 300 s). `Role`-based authorization:
+  admin routes require role `admin` (403 otherwise); clinicians read/write
+  clinical data; auditors read-only.
+- WS auth = same access JWT (query param `token`, Authorization header)
+  validated before the protocol handshake; per-user concurrent session cap
+  (`MS_RATE_LIMIT__WS_SESSIONS_PER_USER`, default 5) enforced before provider
+  work begins. Dev static token is non-production only.
+- Provider secrets: Fernet-encrypted at rest
+  (`ai_providers.secret_ciphertext`, key from
+  `MS_SECURITY__SECRET_ENCRYPTION_KEY`) — stored via the admin API, decrypted
+  in exactly ONE place (`ai_bridge.provider_config_with_secrets`, right
+  before a provider factory consumes the key), and never returned by any
+  endpoint, query, or log line.
 
 ## 9. Observability
 

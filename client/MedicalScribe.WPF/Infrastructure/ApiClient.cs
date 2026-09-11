@@ -68,7 +68,7 @@ public sealed class ApiClient : IApiClient
     public async Task<TokenPairDto> LoginAsync(LoginRequestDto request, CancellationToken ct = default)
     {
         var result = await PostAsync<TokenPairDto>("/api/v1/auth/login", request, ct);
-        _tokens.SetAccessToken(result.AccessToken, result.ExpiresIn);
+        _tokens.SetTokens(result.AccessToken, result.RefreshToken, result.ExpiresIn);
         return result;
     }
 
@@ -76,7 +76,12 @@ public sealed class ApiClient : IApiClient
     {
         try
         {
-            await PostAsync<object>("/api/v1/auth/logout", new { }, ct);
+            // revoke the one-time refresh token server-side (Phase 7 rotation);
+            // the server tolerates an absent token
+            await PostAsync<object>(
+                "/api/v1/auth/logout",
+                new { refresh_token = _tokens.RefreshToken },
+                ct);
         }
         finally
         {

@@ -1,38 +1,55 @@
-"""Auth endpoints.
+"""Auth endpoints (Phase 7: real credential authentication).
 
-Phase 1 freezes the *contract* (schemas + routes) and returns 501
-AUTH_NOT_IMPLEMENTED so the WPF login flow can be built and tested against
-real status codes; credential verification, password hashing, refresh
-rotation and lockout policy land in Phase 7 (docs/ARCHITECTURE.md §Auth).
+- ``POST /auth/login`` — argon2 verification against the users table
+  (requires MS_DATABASE__URL); lockout after repeated failures; issues a
+  short-TTL access JWT + one-time refresh token.
+- ``POST /auth/refresh`` — rotation: the presented refresh token is consumed
+  (single use); reuse of a consumed token revokes ALL of the user's sessions.
+- ``POST /auth/logout`` — consumes the presented refresh token.
+- ``GET  /auth/me`` — principal echo (unchanged since Phase 1).
 
-GET /me is fully functional today for bearer-token principals (JWT or dev
-token) — it exercises the auth dependency chain end-to-end.
+The dev-token path remains for non-production builds without a database.
 """
 from __future__ import annotations
+
+import logging
 
 from fastapi import APIRouter, Request
 
 from api.auth.deps import CurrentPrincipal
 from api.errors import ApiError, ErrorCode
-from api.schemas.auth import LoginRequest, PrincipalInfo, RefreshRequest, TokenPair
-from api.version import PHASE
+from api.schemas.auth import (
+    LoginRequest,
+    LogoutRequest,
+    PrincipalInfo,
+    RefreshRequest,
+    TokenPair,
+)
+from api.services.auth_service import AuthError
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-_NOT_READY_DETAIL = (
-    f"credential authentication is scheduled for Phase 7 (current Phase {PHASE}); "
-    "dev builds may use MS_AUTH__DEV_TOKEN with Authorization: Bearer"
-)
+
+def _auth_service(request: Request):
+    return request.app.state.auth_service
 
 
-def _not_implemented() -> ApiError:
-    return ApiError(501, ErrorCode.AUTH_NOT_IMPLEMENTED, _NOT_READY_DETAIL)
+def _auth_error(exc: AuthError) -> ApiError:
+    status = exc.status_code
+    code = {
+        401: ErrorCode.UNAUTHENTICATED,
+        403: ErrorCode.FORBIDDEN,
+        429: ErrorCode.RATE_LIMITED,
+        501: ErrorCode.AUTH_NOT_IMPLEMENTED,
+    }.get(status, ErrorCode.INTERNAL)
+    return ApiError(status, code, exc.reason)
 
 
 @router.post("/login", response_model=TokenPair)
 async def login(request: Request, body: LoginRequest) -> TokenPair:
     settings = request.app.state.settings
-    # Dev convenience: static token login without a database.
+    # Dev convenience: static token login without a database (never in prod).
     dev = settings.auth.dev_token
     if (
         dev is not None
@@ -40,36 +57,65 @@ async def login(request: Request, body: LoginRequest) -> TokenPair:
         and body.username == "dev"
         and dev.get_secret_value() == body.password
     ):
-        from api.auth.tokens import create_token
-
-        secret = settings.auth.jwt_secret.get_secret_value() if settings.auth.jwt_secret else "dev-only-secret-change-me"
-        access, _jti = create_token(
-            secret, sub="dev", role="admin", ttl_minutes=settings.auth.access_ttl_minutes
-        )
-        refresh, _ = create_token(
-            secret,
-            sub="dev",
-            role="admin",
-            ttl_minutes=settings.auth.refresh_ttl_days * 24 * 60,
-            typ="refresh",
+        service = _auth_service(request)
+        try:
+            pair = await service.issue_pair("dev", "admin", body.device_name or "dev")
+        except AuthError as exc:  # no jwt secret configured
+            raise _auth_error(exc) from exc
+        request.app.state.audit.emit(
+            "login", user_id="dev", method="dev-token", ok=True
         )
         return TokenPair(
-            access_token=access,
-            refresh_token=refresh,
-            expires_in=settings.auth.access_ttl_minutes * 60,
+            access_token=pair.access_token,
+            refresh_token=pair.refresh_token,
+            expires_in=pair.expires_in,
         )
-    raise _not_implemented()
+
+    try:
+        service = _auth_service(request)
+        pair = await service.login(
+            body.username, body.password, device=body.device_name or ""
+        )
+    except AuthError as exc:
+        request.app.state.audit.emit(
+            "login", user_id=None, username_len=len(body.username), ok=False,
+            reason=exc.reason[:120],
+        )
+        raise _auth_error(exc) from exc
+    request.app.state.audit.emit(
+        "login", user_id=pair.user_id, method="credentials", ok=True
+    )
+    return TokenPair(
+        access_token=pair.access_token,
+        refresh_token=pair.refresh_token,
+        expires_in=pair.expires_in,
+    )
 
 
 @router.post("/refresh", response_model=TokenPair)
-async def refresh(body: RefreshRequest) -> TokenPair:
-    raise _not_implemented()
+async def refresh(request: Request, body: RefreshRequest) -> TokenPair:
+    try:
+        service = _auth_service(request)
+        pair = await service.refresh(body.refresh_token)
+    except AuthError as exc:
+        raise _auth_error(exc) from exc
+    return TokenPair(
+        access_token=pair.access_token,
+        refresh_token=pair.refresh_token,
+        expires_in=pair.expires_in,
+    )
 
 
 @router.post("/logout")
-async def logout(principal: CurrentPrincipal) -> dict:
-    # Real implementation revokes the refresh token (Phase 7).
-    return {"status": "ok", "note": "no revocation store yet (Phase 7)", "user_id": principal.user_id}
+async def logout(
+    request: Request, principal: CurrentPrincipal, body: LogoutRequest | None = None
+) -> dict:
+    # revoke the presented refresh token (rotation makes it single-use anyway)
+    service = _auth_service(request)
+    if body is not None and body.refresh_token:
+        await service.logout(body.refresh_token)
+    request.app.state.audit.emit("logout", user_id=principal.user_id)
+    return {"status": "ok", "user_id": principal.user_id}
 
 
 @router.get("/me", response_model=PrincipalInfo)

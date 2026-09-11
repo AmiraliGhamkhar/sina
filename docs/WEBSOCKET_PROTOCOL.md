@@ -29,7 +29,7 @@ with a loud server warning.
 | 4401 | authentication failed / required |
 | 4408 | handshake or idle timeout (idle = 3× heartbeat) |
 | 4409 | protocol version unsupported (client must upgrade or refuse) |
-| 4400 | policy violation (malformed frame, unknown first message) |
+| 4400 | policy violation (malformed frame, unknown first message, per-user session cap exceeded — `error.code` = `RATE_LIMITED`) |
 | 4503 | no eligible AI provider right now (retry later; see `error.code`) |
 | 1000 | normal `session.stop` completion |
 
@@ -42,7 +42,9 @@ with a loud server warning.
   "provider": null,                    // explicit STT provider name or null → router decides
   "mode": "auto",                      // "local" | "cloud" | "hybrid" | "auto" (policy, may be overridden by privacy)
   "privacy_required": true,            // null → server default (currently: true = local only)
-  "encounter_id": "enc_01...",         // optional, validated server-side once P7 exists
+  "encounter_id": "enc_01...",         // optional (Phase 7): links the session to a durable
+                                       //   encounter row; unknown ids are NOT rejected (encounter
+                                       //   creation is async in clinician workflow) — they persist as-is
   "audio": { "encoding": "pcm_s16le", "sample_rate": 16000, "channels": 1 },
   "client": { "name": "MedicalScribe.WPF", "version": "0.1.0", "device": "clinic-pc-3" }
 }

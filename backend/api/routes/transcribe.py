@@ -21,7 +21,11 @@ from ai.router import NoEligibleProviderError, route
 from api.auth.deps import OptionalPrincipal
 from api.errors import ApiError, ErrorCode
 from api.schemas.transcribe import BatchSegment, TranscribeBatchResponse
-from api.services.ai_bridge import batch_route_request, build_candidates
+from api.services.ai_bridge import (
+    batch_route_request,
+    build_candidates,
+    provider_config_with_secrets,
+)
 
 router = APIRouter(prefix="/transcribe", tags=["transcribe"])
 
@@ -74,7 +78,7 @@ async def transcribe_batch(
     pcm, rate, channels = _parse_audio(raw, sample_rate)
 
     request_id = f"bat_{uuid.uuid4().hex[:16]}"
-    candidates = build_candidates(request.app, ProviderKind.STT)
+    candidates = await build_candidates(request.app, ProviderKind.STT)
     route_request = batch_route_request(
         request.app,
         language=language,
@@ -111,7 +115,8 @@ async def transcribe_batch(
         entry: dict = {"provider": attempt_name}
         try:
             stt = registry.create(
-                ProviderKind.STT, attempt_name, settings.provider_config("stt", attempt_name)
+                ProviderKind.STT, attempt_name,
+                await provider_config_with_secrets(request.app, "stt", attempt_name),
             )
         except ProviderError as exc:
             entry["error"] = f"initialization: {exc}"[:200]

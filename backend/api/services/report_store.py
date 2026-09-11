@@ -13,11 +13,16 @@ Rules enforced here (the API layer just maps exceptions to HTTP codes):
   start a new amendment draft linked to the approved version;
 - acknowledgments require a recorded justification (spec §18 acceptance).
 
-Storage: in-memory LRU (Phase 7 → PostgreSQL Report/ReportSection rows +
-revision table). The service API is the seam repositories will implement.
+Storage (Phase 7): in-memory cache + durable mirror. When a
+ReportRepository is attached (MS_DATABASE__URL set) every mutation
+write-through to the ``reports`` table with an append-only
+``report_revisions`` row, and ``get``/``list_by_encounter`` fall back to
+DB loads after LRU eviction. Persistence failures log loudly but never
+break the clinical flow (the cache stays authoritative until restart).
 """
 from __future__ import annotations
 
+import logging
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -154,14 +159,122 @@ class Report:
 
 
 class ReportStore:
-    def __init__(self, max_reports: int = MAX_REPORTS) -> None:
+    def __init__(self, max_reports: int = MAX_REPORTS, repo=None) -> None:
         self._lock = RLock()
         self._by_id: dict[str, Report] = {}
         self._max = max_reports
+        self._repo = repo  # api.repositories.reports.ReportRepository | None
 
-    # -- creation ---------------------------------------------------------------
+    # -- persistence helpers ----------------------------------------------------
 
-    def create_draft(
+    async def _persist(self, report: Report, *, action: str, user_id: str | None,
+                       detail: dict | None = None) -> None:
+        if self._repo is None:
+            return
+        try:
+            await self._repo.save(
+                self._serialize(report),
+                revision={"action": action, "user_id": user_id, "detail": detail or {}},
+            )
+        except Exception:  # noqa: BLE001 — cache stays authoritative on DB lag
+            logging.getLogger(__name__).exception(
+                "report db write-through failed report=%s action=%s", report.report_id, action
+            )
+
+    @staticmethod
+    def _serialize(report: Report) -> dict:
+        return {
+            "report_id": report.report_id,
+            "encounter_id": report.encounter_id,
+            "session_id": report.session_id,
+            "template_key": report.template_key,
+            "template_name": report.template_name,
+            "language": report.language,
+            "status": report.status,
+            "sections": dict(report.sections),
+            "section_titles": dict(report.section_titles),
+            "warnings": [
+                {
+                    "id": _warn_id(report.report_id, i),
+                    **w.as_dict(),
+                    "acknowledged": _warn_id(report.report_id, i) in report.acknowledgments,
+                    "acknowledgment_justification": (
+                        report.acknowledgments[_warn_id(report.report_id, i)].justification
+                        if _warn_id(report.report_id, i) in report.acknowledgments else None
+                    ),
+                }
+                for i, w in enumerate(report.warnings)
+            ],
+            "provider": report.provider,
+            "model": report.model,
+            "routing_reason": report.routing_reason,
+            "privacy_override_applied": report.privacy_override_applied,
+            "phi_redaction_applied": report.phi_redaction_applied,
+            "terminology_substitutions": report.terminology_substitutions,
+            "created_by": report.created_by,
+            "created_at": report.created_at,
+            "updated_at": report.updated_at,
+            "amended_from": report.amended_from,
+            # full ack state + events for exact round-trip (private columns)
+            "events": [
+                {"action": e.action, "at": e.at, "user_id": e.user_id, "detail": e.detail}
+                for e in report.events
+            ],
+        }
+
+    @classmethod
+    def _deserialize(cls, data: dict) -> Report:
+        warnings: list[ValidationWarning] = []
+        acks: dict[str, Acknowledgment] = {}
+        for i, w in enumerate(data.get("warnings") or []):
+            wid = w.get("id") or _warn_id(data["report_id"], i)
+            warnings.append(
+                ValidationWarning(
+                    code=w.get("code", "unknown"),
+                    severity=w.get("severity", "warning"),  # type: ignore[arg-type]
+                    message=w.get("message", ""),
+                    section_id=w.get("section_id"),
+                    evidence=w.get("evidence"),
+                )
+            )
+            if w.get("acknowledged") and w.get("acknowledgment_justification"):
+                acks[wid] = Acknowledgment(
+                    warning_id=wid,
+                    justification=w["acknowledgment_justification"],
+                    user_id=None,
+                    at="",
+                )
+        report = Report(
+            report_id=data["report_id"],
+            encounter_id=data["encounter_id"],
+            session_id=data.get("session_id"),
+            template_key=data.get("template_key"),
+            template_name=data.get("template_name"),
+            language=data.get("language", "fa-en"),
+            status=data.get("status", STATUS_DRAFT),
+            sections=dict(data.get("sections") or {}),
+            section_titles=dict(data.get("section_titles") or {}),
+            warnings=warnings,
+            provider=data.get("provider"),
+            model=data.get("model"),
+            routing_reason=data.get("routing_reason", ""),
+            privacy_override_applied=bool(data.get("privacy_override_applied")),
+            phi_redaction_applied=bool(data.get("phi_redaction_applied")),
+            terminology_substitutions=int(data.get("terminology_substitutions") or 0),
+            created_by=data.get("created_by"),
+            created_at=data.get("created_at", ""),
+            updated_at=data.get("updated_at", ""),
+            amended_from=data.get("amended_from"),
+        )
+        report.acknowledgments.update(acks)
+        for e in data.get("events") or []:
+            report.events.append(
+                ReportEvent(e.get("action", ""), e.get("at", ""), e.get("user_id"),
+                            dict(e.get("detail") or {}))
+            )
+        return report
+
+    async def create_draft(
         self,
         *,
         encounter_id: str,
@@ -206,17 +319,50 @@ class ReportStore:
         with self._lock:
             self._by_id[report_id] = report
             self._evict_locked()
+        await self._persist(report, action="draft_generated", user_id=created_by,
+                            detail={"provider": provider})
         return report
 
     # -- reads --------------------------------------------------------------------
 
-    def get(self, report_id: str) -> Report | None:
+    def get_cached(self, report_id: str) -> Report | None:
         with self._lock:
             return self._by_id.get(report_id)
 
-    def list_by_encounter(self, encounter_id: str) -> list[Report]:
+    async def get(self, report_id: str) -> Report | None:
         with self._lock:
-            return [r for r in self._by_id.values() if r.encounter_id == encounter_id]
+            report = self._by_id.get(report_id)
+        if report is not None:
+            return report
+        if self._repo is None:
+            return None
+        try:
+            data = await self._repo.load(report_id)
+        except Exception:  # noqa: BLE001
+            logging.getLogger(__name__).exception("report db load failed report=%s", report_id)
+            return None
+        if data is None:
+            return None
+        report = self._deserialize(data)
+        with self._lock:
+            self._by_id.setdefault(report_id, report)
+        return report
+
+    async def list_by_encounter(self, encounter_id: str) -> list[Report]:
+        with self._lock:
+            cached = [r for r in self._by_id.values() if r.encounter_id == encounter_id]
+        if self._repo is None or cached:
+            return cached
+        try:
+            rows = await self._repo.list_by_encounter(encounter_id)
+        except Exception:  # noqa: BLE001
+            return cached
+        out: list[Report] = []
+        for data in rows:
+            with self._lock:
+                existing = self._by_id.get(data["report_id"])
+            out.append(existing if existing is not None else self._deserialize(data))
+        return out
 
     def count(self) -> int:
         with self._lock:
@@ -234,7 +380,7 @@ class ReportStore:
 
     # -- lifecycle -------------------------------------------------------------------
 
-    def edit_sections(
+    async def edit_sections(
         self, report_id: str, sections: dict[str, str], *, user_id: str | None
     ) -> Report:
         with self._lock:
@@ -258,9 +404,11 @@ class ReportStore:
                     "sections_edited", _now(), user_id, {"section_ids": sorted(sections)}
                 )
             )
-            return report
+        await self._persist(report, action="sections_edited", user_id=user_id,
+                            detail={"section_ids": sorted(sections)})
+        return report
 
-    def acknowledge(
+    async def acknowledge(
         self, report_id: str, warning_id: str, justification: str, *, user_id: str | None
     ) -> Report:
         with self._lock:
@@ -280,9 +428,11 @@ class ReportStore:
             report.events.append(
                 ReportEvent("warning_acknowledged", _now(), user_id, {"warning_id": warning_id})
             )
-            return report
+        await self._persist(report, action="warning_acknowledged", user_id=user_id,
+                            detail={"warning_id": warning_id})
+        return report
 
-    def finalize(self, report_id: str, *, user_id: str | None) -> Report:
+    async def finalize(self, report_id: str, *, user_id: str | None) -> Report:
         with self._lock:
             report = self._require(report_id)
             if report.status != STATUS_DRAFT:
@@ -299,9 +449,10 @@ class ReportStore:
             report.status = STATUS_FINALIZED
             report.updated_at = _now()
             report.events.append(ReportEvent("finalized", _now(), user_id, {}))
-            return report
+        await self._persist(report, action="finalized", user_id=user_id)
+        return report
 
-    def approve(self, report_id: str, *, user_id: str | None) -> Report:
+    async def approve(self, report_id: str, *, user_id: str | None) -> Report:
         with self._lock:
             report = self._require(report_id)
             if report.status != STATUS_FINALIZED:
@@ -318,9 +469,10 @@ class ReportStore:
             report.status = STATUS_APPROVED
             report.updated_at = _now()
             report.events.append(ReportEvent("approved", _now(), user_id, {}))
-            return report
+        await self._persist(report, action="approved", user_id=user_id)
+        return report
 
-    def reopen(self, report_id: str, *, user_id: str | None) -> Report:
+    async def reopen(self, report_id: str, *, user_id: str | None) -> Report:
         """finalized → draft (explicit clinician pull-back before approval)."""
         with self._lock:
             report = self._require(report_id)
@@ -329,9 +481,10 @@ class ReportStore:
             report.status = STATUS_DRAFT
             report.updated_at = _now()
             report.events.append(ReportEvent("reopened", _now(), user_id, {}))
-            return report
+        await self._persist(report, action="reopened", user_id=user_id)
+        return report
 
-    def amend(self, report_id: str, *, user_id: str | None) -> Report:
+    async def amend(self, report_id: str, *, user_id: str | None) -> Report:
         """Approved → new linked draft (the approved version stays untouched)."""
         with self._lock:
             approved = self._require(report_id)
@@ -363,7 +516,11 @@ class ReportStore:
             )
             self._by_id[new_id] = amendment
             approved.events.append(ReportEvent("amended", _now(), user_id, {"to": new_id}))
-            return amendment
+        await self._persist(amendment, action="amendment_created", user_id=user_id,
+                            detail={"from": approved.report_id})
+        await self._persist(approved, action="amended", user_id=user_id,
+                            detail={"to": new_id})
+        return amendment
 
     def _require(self, report_id: str) -> Report:
         report = self._by_id.get(report_id)

@@ -11,8 +11,10 @@ auth_denied. (Phase 7+: login, report_finalized, report_approved, settings_chang
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import queue
 import threading
 import time
 from pathlib import Path
@@ -59,18 +61,74 @@ class AuditLog:
         self._path = path
         self._enabled = enabled and path is not None
         self._lock = threading.Lock()
+        # Phase 7 — durable sink (set via attach_db; None keeps file-only)
+        self._repo = None
+        self._queue: queue.Queue[dict | None] = queue.Queue(maxsize=2000)
+        self._writer = None
+
+    # -- DB sink -----------------------------------------------------------
+
+    def attach_db(self, repo) -> None:
+        """Enable the durable sink (api.repositories.audit.AuditRepository)
+        and start the background writer. Call from an async context (app
+        lifespan) — safe to call once at startup."""
+        import asyncio
+
+        if self._repo is not None:
+            return
+        self._repo = repo
+
+        async def _writer() -> None:
+            while True:
+                item = await asyncio.to_thread(self._queue.get)
+                if item is None:
+                    return
+                try:
+                    await self._repo.append(
+                        item["event"], item.get("user_id"), item.get("payload") or {}
+                    )
+                except Exception:  # noqa: BLE001 — never break the app on audit I/O
+                    logger.warning("audit db write failed", exc_info=True)
+
+        try:
+            self._writer = asyncio.get_running_loop().create_task(_writer())
+        except RuntimeError:  # pragma: no cover — sync test context
+            self._repo = None
+            logger.warning("audit db attach outside event loop — file sink only")
+
+    async def stop_writer(self) -> None:
+        if self._writer is not None:
+            self._queue.put_nowait(None)
+            try:
+                await asyncio.wait_for(self._writer, timeout=5)
+            except Exception:  # pragma: no cover
+                logger.debug("audit writer stop failed", exc_info=True)
+            self._writer = None
+
+    def _enqueue_db(self, record: dict[str, Any]) -> None:
+        if self._repo is None:
+            return
+        try:
+            self._queue.put_nowait(record)
+        except queue.Full:  # drop the DB copy, JSONL already has it
+            logger.warning("audit db queue full; record kept in JSONL only")
 
     def emit(self, event: str, **meta: Any) -> None:
-        """Append one JSONL audit record. Never raises into request flow:
-        a failed audit write logs locally but must not break the encounter."""
-        if not self._enabled:
-            logger.debug("audit (disabled) event=%s", event)
-            return
+        """Append one JSONL audit record (+ DB queue in persistence mode).
+        Never raises into request flow: a failed audit write logs locally
+        but must not break the encounter."""
+        sanitized = _sanitize(meta)
         record = {
             "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "event": event,
-            **_sanitize(meta),
+            **sanitized,
         }
+        self._enqueue_db(
+            {"event": event, "user_id": sanitized.get("user_id"), "payload": sanitized}
+        )
+        if not self._enabled:
+            logger.debug("audit (disabled) event=%s", event)
+            return
         try:
             with self._lock:
                 self._path.parent.mkdir(parents=True, exist_ok=True)  # type: ignore[union-attr]

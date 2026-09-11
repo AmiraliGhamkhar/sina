@@ -77,6 +77,8 @@ class StoredTranscript:
     user_id: str
     provider: str | None = None
     language: str | None = None
+    #: clinical linkage from session.start (Phase 7 persistence)
+    encounter_id: str | None = None
     started_at: float = field(default_factory=time.time)
     ended_at: float | None = None
     segments: list[StoredSegment] = field(default_factory=list)
@@ -119,11 +121,21 @@ class TranscriptStore:
 
     # -- lifecycle -----------------------------------------------------------
     def open(
-        self, session_id: str, *, user_id: str, provider: str | None, language: str | None
+        self,
+        session_id: str,
+        *,
+        user_id: str,
+        provider: str | None,
+        language: str | None,
+        encounter_id: str | None = None,
     ) -> StoredTranscript:
         with self._lock:
             transcript = StoredTranscript(
-                session_id=session_id, user_id=user_id, provider=provider, language=language
+                session_id=session_id,
+                user_id=user_id,
+                provider=provider,
+                language=language,
+                encounter_id=encounter_id,
             )
             self._by_session[session_id] = transcript
             self._evict_locked()
@@ -326,6 +338,15 @@ class TranscriptStore:
     def count(self) -> int:
         with self._lock:
             return len(self._by_session)
+
+    def sessions_for_encounter(self, encounter_id: str) -> list[str]:
+        """Session ids linked to an encounter (live + completed, in memory)."""
+        with self._lock:
+            return [
+                t.session_id
+                for t in self._by_session.values()
+                if t.encounter_id == encounter_id
+            ]
 
     # -- Phase 6: prompt/report assembly ------------------------------------------
 

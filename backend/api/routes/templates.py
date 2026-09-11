@@ -31,7 +31,7 @@ from api.schemas.templates import (
     TemplateSectionOut,
     TemplateUpdateRequest,
 )
-from api.services.ai_bridge import build_candidates, llm_route_request
+from api.services.ai_bridge import build_candidates, llm_route_request, provider_config_with_secrets
 from api.services.note_prompt import parse_model_json, redact_phi
 from api.services.templates import TemplateError, TemplateService
 
@@ -68,7 +68,7 @@ async def create_template(
     request: Request, body: TemplateCreateRequest, principal: OptionalPrincipal = None
 ) -> TemplateOut:
     try:
-        template = _service(request).create(
+        template = await _service(request).create(
             key=body.key,
             name=body.name,
             category=body.category,
@@ -94,7 +94,7 @@ async def update_template(
     principal: OptionalPrincipal = None,
 ) -> TemplateOut:
     try:
-        template = _service(request).update(
+        template = await _service(request).update(
             key,
             name=body.name,
             description=body.description,
@@ -114,7 +114,7 @@ async def delete_template(
     request: Request, key: str, principal: OptionalPrincipal = None
 ) -> None:
     try:
-        _service(request).delete(key)
+        await _service(request).delete(key)
     except TemplateError as exc:
         raise ApiError(422, ErrorCode.VALIDATION, str(exc)) from exc
     request.app.state.audit.emit(
@@ -127,7 +127,7 @@ async def fork_template(
     request: Request, key: str, body: TemplateForkRequest, principal: OptionalPrincipal = None
 ) -> TemplateOut:
     try:
-        template = _service(request).fork(key, new_key=body.new_key, new_name=body.new_name)
+        template = await _service(request).fork(key, new_key=body.new_key, new_name=body.new_name)
     except TemplateError as exc:
         raise ApiError(422, ErrorCode.VALIDATION, str(exc)) from exc
     request.app.state.audit.emit(
@@ -169,7 +169,7 @@ async def extract_template(
     app = request.app
     settings = app.state.settings
     try:
-        decision = route_llm(app, body)
+        decision = await route_llm(app, body)
     except NoEligibleProviderError as exc:
         raise ApiError(503, ErrorCode.NO_PROVIDER, str(exc)) from exc
 
@@ -194,7 +194,8 @@ async def extract_template(
     for attempt_name in [decision.provider, *decision.fallbacks]:
         try:
             provider = app.state.ai_registry.create(
-                ProviderKind.LLM, attempt_name, settings.provider_config("llm", attempt_name)
+                ProviderKind.LLM, attempt_name,
+                await provider_config_with_secrets(app, "llm", attempt_name),
             )
             completion = await provider.complete(
                 messages, temperature=0.0, max_tokens=1200, json_mode=True
@@ -248,13 +249,13 @@ async def extract_template(
     )
 
 
-def route_llm(app, body: TemplateExtractRequest):
+async def route_llm(app, body: TemplateExtractRequest):
     from ai.router import route
 
     return route(
         llm_route_request(
             app, mode=body.mode, privacy_required=body.privacy_required, provider=body.provider
         ),
-        build_candidates(app, ProviderKind.LLM),
+        await build_candidates(app, ProviderKind.LLM),
     )
 

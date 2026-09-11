@@ -27,6 +27,8 @@ class Principal:
     role: str
     session_id: str | None = None
     is_dev: bool = False
+    #: token id — the refresh-rotation key (Phase 7)
+    jti: str | None = None
 
 
 def create_token(
@@ -66,4 +68,9 @@ def decode_token(secret: str, token: str, *, expected_typ: str = "access") -> Pr
     sub = claims.get("sub")
     if not sub:
         raise TokenError("missing subject")
-    return Principal(user_id=str(sub), role=str(claims.get("role") or "clinician"), session_id=claims.get("sid"))
+    return Principal(
+        user_id=str(sub),
+        role=str(claims.get("role") or "clinician"),
+        session_id=claims.get("sid"),
+        jti=claims.get("jti"),
+    )

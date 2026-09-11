@@ -40,12 +40,29 @@ class AuthConfig(BaseModel):
     #: dev-only static bearer token accepted as the "dev operator" principal.
     #: Never enabled when env == "production".
     dev_token: SecretStr | None = None
+    # Phase 7 — credential auth
+    argon2_time_cost: int = 3
+    argon2_memory_cost: int = 65536  # KiB
+    argon2_parallelism: int = 4
+    lockout_max_failures: int = 5
+    lockout_seconds: int = 300
+    #: bootstrap the admin user when a password is provided (never defaulted)
+    bootstrap_admin_username: str = "admin"
+    bootstrap_admin_password: SecretStr | None = None
 
 
 class DatabaseConfig(BaseModel):
     url: str | None = None  # postgresql+asyncpg://user:pw@host:5432/medicalscribe
     echo: bool = False
     pool_size: int = 10
+    #: create_all on boot (dev convenience). Production uses alembic migrations.
+    auto_create: bool = True
+
+
+class SecurityConfig(BaseModel):
+    """Phase 7 — provider-secret encryption key (Fernet). Server-side only."""
+
+    secret_encryption_key: SecretStr | None = None
 
 
 class RedisConfig(BaseModel):
@@ -57,6 +74,8 @@ class RateLimitConfig(BaseModel):
     requests_per_minute: int = 120
     auth_per_minute: int = 10
     window_seconds: int = 60
+    #: max simultaneous WS transcription sessions per user (spec §14)
+    ws_sessions_per_user: int = 5
 
 
 class LlamaServerConfig(BaseModel):
@@ -223,6 +242,7 @@ class Settings(BaseSettings):
     routing: RoutingConfig = Field(default_factory=RoutingConfig)
     websocket: WebsocketConfig = Field(default_factory=WebsocketConfig)
     audit: AuditConfig = Field(default_factory=AuditConfig)
+    security: SecurityConfig = Field(default_factory=SecurityConfig)
 
     @property
     def is_production(self) -> bool:

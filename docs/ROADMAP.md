@@ -215,18 +215,46 @@ Done notes (deviations recorded honestly):
   CI (no SDK in the dev sandbox) — command projection + lifecycle logic is
   unit-tested headlessly, window-level behavior needs the Windows runner.
 
-## Phase 7 — Persistence, auth, Redis
-- SQLAlchemy models (all §13 entities) + Alembic baseline migration + seed
-  script (roles, built-in templates, provider rows from env).
-- Auth: argon2 hashing, login/refresh (rotation + revocation), roles/policies,
-  WS token = access JWT (short TTL), lockout policy; rate limiting via Redis
-  (degrade-open + auth-bucket, MMG shape) — with per-WS connection caps.
-- AuditLog table (append-only, deny-listed payload) + admin query API;
-  transcripts/segments/reports persistence, revisions table (clinician edits),
-  audio policy: discard after finalize unless `MS_AUDIO__RETAIN_HOURS`.
-- Acceptance: postgres/redis compose profile integration tests (testcontainers
-  or compose-run CI), migration up/down round-trip, auth e2e incl. expired/
-  revoked token paths.
+## Phase 7 — Persistence, auth, Redis ✅ (done — this build)
+- SQLAlchemy 2.0 async models for all §13 entities (`backend/api/models/orm.py`,
+  14 tables) + Alembic baseline migration (`backend/alembic`, URL from
+  `MS_DATABASE__URL`) + idempotent seed (roles, built-in templates as rows,
+  provider metadata mirror, admin bootstrap only with an explicit password).
+- Auth: argon2id hashing (dummy-hash timing equalizer), credential
+  login/refresh/logout, one-time refresh tokens with rotation — reuse of a
+  consumed token revokes ALL of that user's sessions; per-username lockout
+  (5 failures → 300 s default); dev-token path unchanged for non-prod.
+- Rate limiting: Redis backend when `MS_REDIS__URL` is set, in-process
+  otherwise, degrade-open on backend failure (lockout guard remains as the
+  auth bucket's second layer); tighter auth bucket; per-user concurrent WS
+  session cap (`MS_RATE_LIMIT__WS_SESSIONS_PER_USER`).
+- Audit dual-write: JSONL file (unchanged) + `audit_log` rows via a bounded
+  background writer (drops to file-only when the queue is full); admin query
+  API `GET /api/v1/admin/audit`.
+- Persistence write-through: transcripts (whole-session idempotent upsert on
+  WS session end, shielded from transport-teardown cancellation), reports +
+  `report_revisions` rows, template catalog reload, AI request ledger; memory
+  caches stay authoritative on DB lag (write failures log + count, never
+  break the clinical flow); `GET` falls back to durable rows after LRU
+  eviction or restart.
+- Provider secrets: Fernet-encrypted at rest (`ai_providers.secret_ciphertext`),
+  admin PUT/DELETE API, decrypted in exactly one place
+  (`ai_bridge.provider_config_with_secrets`); secrets never appear in
+  queries, listings, or logs.
+- New surface: `POST /patients`, `GET /patients`, `GET /patients/{id}`,
+  `POST /encounters`, `GET /encounters/{id}`, `GET /reports/{id}/revisions`,
+  admin users/audit/secrets/ai-requests endpoints.
+- In-memory dev mode is unchanged and fully functional when
+  `MS_DATABASE__URL` is unset; DB-backed routes answer 501
+  `DB_NOT_CONFIGURED` instead of pretending.
+- Done-notes (honesty ledger): integration tests run on sqlite+aiosqlite
+  (same engine code path as Postgres minus the server) — a real
+  postgres/redis compose-profile CI job is still open (Phase 8 hardening);
+  audio retention policy (`MS_AUDIO__RETAIN_HOURS`) not implemented — audio
+  is never persisted in the first place (only transcripts/reports); WPF
+  client stores the refresh token in memory and sends it on logout, but has
+  no background auto-refresh timer yet (token TTL 30 min; re-login required
+  after expiry in the current client).
 
 ## Phase 8 — Hardening & release
 - Prometheus `/metrics` (+optional OTel traces), Grafana dashboard shipped in

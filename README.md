@@ -31,13 +31,19 @@ docker-compose.yml .env.example
 Backend (Linux/macOS/Windows, Python 3.11+; production images use 3.12+):
 
 ```bash
-python -m venv .venv && .venv/bin/pip install -e ".[dev]"
-cp .env.example .env                     # set MS_AUTH__DEV_TOKEN, secrets optional in Phase 1
-.venv/bin/python -m pytest               # 243 tests: + commands, terminology, templates, lifecycle, validation
+python -m venv .venv && .venv/bin/pip install -e ".[dev,db,cache,security]"
+cp .env.example .env                     # dev mode needs no database; durable mode: set MS_DATABASE__URL
+.venv/bin/python -m pytest               # 265 tests: + auth, persistence, vault, rate limiting
 .venv/bin/python -m uvicorn api.main:app --app-dir backend --port 8000
 curl localhost:8000/health
 curl "localhost:8000/api/v1/providers?probe=health"
 ```
+
+Durable mode (Postgres) without Docker: set `MS_DATABASE__URL`, create the
+schema once with `MS_DATABASE__AUTO_CREATE=true` (dev) or
+`cd backend && MS_DATABASE__URL=... alembic upgrade head` (production), then
+set `MS_AUTH__BOOTSTRAP_ADMIN_PASSWORD` for the first boot to create the
+admin user.
 
 Docker: `docker compose up` (api + Postgres + Redis; `--profile llm` adds an
 example llama-server container; it stays an external service — the app never
@@ -51,9 +57,13 @@ dotnet build MedicalScribe.sln
 dotnet run --project MedicalScribe.WPF     # server URL is a User-Setting (stored in %APPDATA%\MedicalScribe\settings.json)
 ```
 
-Login on dev builds: user `dev` / the `MS_AUTH__DEV_TOKEN` value (real
-credentials arrive in Phase 7; the server answers 501 + a stable
-`AUTH_NOT_IMPLEMENTED` code and the client shows that honestly).
+Login: real credentials against the users table (Phase 7; requires
+`MS_DATABASE__URL` — bootstrap the admin with
+`MS_AUTH__BOOTSTRAP_ADMIN_PASSWORD`, then create users via
+`POST /api/v1/admin/users`). Without a database, dev builds still accept
+user `dev` / the `MS_AUTH__DEV_TOKEN` value; credential login answers
+501 + a stable `AUTH_NOT_IMPLEMENTED` code and the client shows that
+honestly.
 
 ## Phase status
 
@@ -65,7 +75,7 @@ credentials arrive in Phase 7; the server answers 501 + a stable
 | 4 | LLM adapters: llama-server + props, OpenAI/Anthropic/Gemini, grounded draft endpoint | ✅ done (this build) |
 | 5 | Router hardening: health fed by task outcomes, latency EWMA ranking, runtime fallback chains (WS + batch + draft), daily token budget soft-stop, optional Redis health mirror | ✅ done |
 | 6 | Voice commands (parser+effects+undo), bilingual terminology, data-driven templates + LLM extraction, report lifecycle (draft→finalized→approved with acknowledged warnings), full clinical validation (doses/units/laterality/negation/dates/identifiers/anatomy) | ✅ done (this build) |
-| 7 | PostgreSQL + SQLAlchemy + Alembic, JWT/refresh/argon2, Redis rate-limit, audit table, encrypted provider rows | planned (URL normalizer, JWT codec, JSONL audit shipped in P1; P6 stores are repository-shaped seams) |
+| 7 | PostgreSQL + SQLAlchemy + Alembic (14 tables, write-through + restart reload), JWT + one-time refresh rotation (reuse ⇒ revoke all), argon2 login w/ lockout, Redis-or-in-process rate limiting (degrade-open) + per-user WS cap, Fernet-encrypted provider secrets, audit dual-write + admin API, patients/encounters | ✅ done (this build) |
 | 8 | Prometheus/OTel, load tests, MSIX packaging, production hardening | planned |
 
 ## Non-negotiables encoded in this codebase
@@ -112,11 +122,14 @@ credentials arrive in Phase 7; the server answers 501 + a stable
    pack and `client-windows` runs it natively with xunit. Runtime behavior
    (window chrome, hotkeys, NAudio device handling, the Phase 6 report/
    templates/command screens) still needs a human pass on a Windows machine.
-2. The live transcript/template/report stores are in-memory LRUs (transcripts:
-   last 200 ended sessions; reports: 500 with approved pinned); a server
-   restart loses them. Persistence + encounter linkage land in Phase 7 — the
-   service APIs are repository-shaped seams for exactly that swap. Logout
-   still has no revocation store.
+2. Persistence landed in Phase 7 (SQLite/Postgres write-through + durable
+   reads after eviction/restart, verified against a real server restart),
+   but integration tests run on sqlite+aiosqlite, not a live Postgres — the
+   compose-profile CI job with real postgres/redis is still open (Phase 8).
+   Cost-budget counters remain in-process (a restart resets the day). The
+   WPF client keeps the refresh token in memory and sends it on logout, but
+   has no background auto-refresh timer yet — after the 30-minute access
+   TTL the user re-logs in.
 3. Heartbeat frames are idle-timeout only (4408); explicit app-level pings +
    nginx read-timeout tuning are deferred to Phase 8.
 4. Cloud STT/LLM adapters (Deepgram/Speechmatics/OpenAI/Anthropic/Gemini)

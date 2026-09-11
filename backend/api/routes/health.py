@@ -42,10 +42,29 @@ async def readiness(request: Request) -> JSONResponse:
     settings = request.app.state.settings
     components: dict[str, dict] = {}
 
-    for name, url in (
-        ("postgres", settings.database.url),
-        ("redis", settings.redis.url),
-    ):
+    # postgres: real engine ping once Phase 7 owns the engine (falls back to
+    # the driver-free TCP probe when the URL is set but the engine could not
+    # be built, e.g. missing db extra)
+    db = getattr(request.app.state, "db", None)
+    if settings.database.url and db is not None:
+        ok = await db.ping()
+        components["postgres"] = {"status": "ok" if ok else "unreachable", "probe": "engine"}
+    elif not settings.database.url:
+        components["postgres"] = {"status": "disabled"}
+    else:
+        target = parse_url_for_probe(settings.database.url)
+        if target is None:
+            components["postgres"] = {
+                "status": "configured", "note": "engine unavailable, not probed"
+            }
+        else:
+            host, port = target
+            ok = await asyncio.to_thread(_tcp_probe, host, port)
+            components["postgres"] = {
+                "status": "ok" if ok else "unreachable", "host": host, "port": port
+            }
+
+    for name, url in (("redis", settings.redis.url),):
         if not url:
             components[name] = {"status": "disabled"}
             continue

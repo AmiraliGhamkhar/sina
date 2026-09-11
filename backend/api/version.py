@@ -10,4 +10,4 @@ WS_PROTOCOL_MIN = 1
 
 APP_NAME = "MedicalScribe API"
 #: Phase this build implements (for honest capability reporting to clients).
-PHASE = 6
+PHASE = 7

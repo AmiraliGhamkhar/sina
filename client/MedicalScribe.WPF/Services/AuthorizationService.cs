@@ -26,7 +26,8 @@ namespace MedicalScribe.WPF.Services;
 public interface IAccessTokenSource
 {
     string? AccessToken { get; }
-    void SetAccessToken(string token, int expiresInSeconds);
+    string? RefreshToken { get; }
+    void SetTokens(string accessToken, string? refreshToken, int expiresInSeconds);
     void Clear();
 }
 
@@ -36,11 +37,16 @@ public sealed class TokenStore : IAccessTokenSource
 
     public string? AccessToken { get; private set; }
 
+    // Phase 7: one-time refresh token (sent only to /auth/refresh + logout,
+    // never persisted to disk)
+    public string? RefreshToken { get; private set; }
+
     public bool IsValid => !string.IsNullOrEmpty(AccessToken) && DateTime.UtcNow < _expiresUtc;
 
-    public void SetAccessToken(string token, int expiresInSeconds)
+    public void SetTokens(string accessToken, string? refreshToken, int expiresInSeconds)
     {
-        AccessToken = token;
+        AccessToken = accessToken;
+        RefreshToken = refreshToken;
         // refresh 30 s early so in-flight requests don't race expiry
         _expiresUtc = DateTime.UtcNow.AddSeconds(Math.Max(30, expiresInSeconds - 30));
     }
@@ -48,6 +54,7 @@ public sealed class TokenStore : IAccessTokenSource
     public void Clear()
     {
         AccessToken = null;
+        RefreshToken = null;
         _expiresUtc = DateTime.MinValue;
     }
 }

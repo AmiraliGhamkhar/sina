@@ -6,13 +6,17 @@ arrive via CRUD or LLM-assisted extraction from an example note (Phlox
 concept, adapted: extraction returns an *unsaved draft* the clinician
 reviews — nothing auto-persists).
 
-Storage: in-memory (Phase 7 swaps this for ReportTemplate rows in
-PostgreSQL; the service API is the stable seam). Built-ins are immutable:
-they can be listed and used but not modified or deleted — clinicians fork
-them into custom templates instead.
+Storage (Phase 7): in-memory cache + optional durable mirror. When a
+TemplateRepository is attached (MS_DATABASE__URL set), every mutation
+write-through to the ``report_templates`` table and built-ins are loaded
+from it at startup — the DB is the source of truth across restarts, the
+cache keeps reads allocation-free. Built-ins are immutable: they can be
+listed and used but not modified or deleted — clinicians fork them into
+custom templates instead.
 """
 from __future__ import annotations
 
+import logging
 import re
 import time
 from dataclasses import dataclass, field
@@ -182,10 +186,63 @@ class TemplateError(ValueError):
 
 
 class TemplateService:
-    def __init__(self, builtins: tuple[ReportTemplate, ...] = BUILTIN_TEMPLATES) -> None:
+    def __init__(
+        self,
+        builtins: tuple[ReportTemplate, ...] = BUILTIN_TEMPLATES,
+        repo=None,
+    ) -> None:
         self._by_key: dict[str, ReportTemplate] = {t.key: t for t in builtins}
+        self._repo = repo  # api.repositories.templates.TemplateRepository | None
 
-    # -- reads ---------------------------------------------------------------
+    # -- persistence ---------------------------------------------------------
+
+    async def load_from_db(self) -> None:
+        """Replace the cache with the durable catalog (startup, DB mode)."""
+        if self._repo is None:
+            return
+        rows = await self._repo.list(include_deleted=True)
+        if not rows:
+            return  # empty DB → keep seeded built-ins (seed.py runs first anyway)
+        self._by_key = {row["key"]: self._row_to_template(row) for row in rows}
+
+    @staticmethod
+    def _row_to_template(row: dict[str, Any]) -> ReportTemplate:
+        return ReportTemplate(
+            key=row["key"],
+            name=row["name"],
+            category=row["category"],
+            description=row.get("description") or "",
+            sections=[TemplateSection(**s) for s in row.get("sections") or []],
+            builtin=bool(row.get("builtin")),
+            version=int(row.get("version") or 1),
+            deleted=bool(row.get("deleted")),
+            created_at=row.get("created_at") or "",
+            updated_at=row.get("updated_at") or "",
+        )
+
+    async def _persist(self, template: ReportTemplate) -> None:
+        if self._repo is None:
+            return
+        try:
+            await self._repo.upsert(
+                {
+                    "key": template.key,
+                    "name": template.name,
+                    "category": template.category,
+                    "description": template.description,
+                    "sections": [s.as_dict() for s in template.sections],
+                    "builtin": template.builtin,
+                    "version": template.version,
+                    "deleted": template.deleted,
+                }
+            )
+        except Exception:  # noqa: BLE001 — durability lag must not break clinical flow
+            logging.getLogger(__name__).exception(
+                "template db write-through failed key=%s (cache remains authoritative)",
+                template.key,
+            )
+
+    # -- reads (memory-cached, allocation-free) --------------------------------
 
     def list(self, *, include_deleted: bool = False) -> list[ReportTemplate]:
         return [
@@ -198,9 +255,9 @@ class TemplateService:
         t = self._by_key.get(key)
         return t if t and not t.deleted else None
 
-    # -- writes ----------------------------------------------------------------
+    # -- writes (memory + write-through) ----------------------------------------
 
-    def create(
+    async def create(
         self,
         *,
         key: str | None,
@@ -231,10 +288,11 @@ class TemplateService:
             updated_at=_now(),
         )
         self._by_key[key] = template
+        await self._persist(template)
         return template
 
-    def update(self, key: str, *, name: str | None = None, description: str | None = None,
-               sections: list[dict[str, Any]] | None = None) -> ReportTemplate:
+    async def update(self, key: str, *, name: str | None = None, description: str | None = None,
+                     sections: list[dict[str, Any]] | None = None) -> ReportTemplate:
         template = self._require_custom(key)
         if name is not None:
             template.name = name.strip()[:120]
@@ -244,19 +302,21 @@ class TemplateService:
             template.sections = self._validate_sections(sections)
         template.version += 1
         template.updated_at = _now()
+        await self._persist(template)
         return template
 
-    def delete(self, key: str) -> None:
+    async def delete(self, key: str) -> None:
         template = self._require_custom(key)
         template.deleted = True  # soft delete — audit trail survives
         template.updated_at = _now()
+        await self._persist(template)
 
-    def fork(self, key: str, *, new_key: str, new_name: str | None = None) -> ReportTemplate:
+    async def fork(self, key: str, *, new_key: str, new_name: str | None = None) -> ReportTemplate:
         """Copy a built-in (or custom) template into an editable custom one."""
         source = self.get(key)
         if source is None:
             raise TemplateError(f"template '{key}' not found")
-        return self.create(
+        return await self.create(
             key=new_key,
             name=new_name or f"{source.name} (copy)",
             category="custom",

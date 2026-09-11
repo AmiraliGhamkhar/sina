@@ -49,7 +49,7 @@ from api.schemas.reports import (
     UsageOut,
     WarningOut,
 )
-from api.services.ai_bridge import build_candidates, llm_route_request
+from api.services.ai_bridge import build_candidates, llm_route_request, provider_config_with_secrets
 from api.services.note_prompt import (
     MISSING_TOKEN,
     build_messages,
@@ -197,7 +197,7 @@ async def create_draft(
             privacy_required=body.privacy_required,
             provider=body.provider,
         )
-        decision = route(route_request, build_candidates(app, ProviderKind.LLM))
+        decision = route(route_request, await build_candidates(app, ProviderKind.LLM))
     except NoEligibleProviderError as exc:
         raise ApiError(503, ErrorCode.NO_PROVIDER, str(exc)) from exc
 
@@ -245,7 +245,8 @@ async def create_draft(
         )
         try:
             provider = registry.create(
-                ProviderKind.LLM, attempt_name, settings.provider_config("llm", attempt_name)
+                ProviderKind.LLM, attempt_name,
+                await provider_config_with_secrets(app, "llm", attempt_name),
             )
         except ProviderError as exc:
             app.state.provider_health.record_failure(f"llm:{attempt_name}")
@@ -362,7 +363,7 @@ async def create_draft(
             ledger.add_usage(used_provider, int(usage.total_tokens))
 
     title_by_id = {s.id: s.title for s in sections}
-    report = app.state.report_store.create_draft(
+    report = await app.state.report_store.create_draft(
         encounter_id=encounter_id,
         session_id=body.session_id,
         template_key=template_key,
@@ -404,6 +405,29 @@ async def create_draft(
     )
 
     missing_sections = fidelity.missing_sections
+
+    # durable usage row (spec §13 AIRequest; counters remain the live view)
+    ai_requests = getattr(app.state, "ai_requests", None)
+    if ai_requests is not None:
+        try:
+            await ai_requests.record(
+                user_id=principal.user_id if principal else None,
+                kind="llm",
+                task="generate_note",
+                provider=used_provider,
+                status="ok",
+                routed_provider=decision.provider,
+                privacy_override=decision.privacy_override_applied,
+                latency_ms=latency_ms,
+                prompt_tokens=usage.prompt_tokens if usage else None,
+                completion_tokens=usage.completion_tokens if usage else None,
+                total_tokens=usage.total_tokens if usage else None,
+                encounter_id=encounter_id,
+                session_id=body.session_id,
+            )
+        except Exception:  # noqa: BLE001 — ledger lag never breaks drafting
+            logger.warning("ai_requests write failed", exc_info=True)
+
     return ReportDraftResponse(
         report_id=report.report_id,
         draft_id=report.report_id,
@@ -477,7 +501,7 @@ async def list_reports(
     principal: OptionalPrincipal = None,
 ) -> ReportListOut:
     store: ReportStore = request.app.state.report_store
-    reports = store.list_by_encounter(encounter_id) if encounter_id else []
+    reports = (await store.list_by_encounter(encounter_id)) if encounter_id else []
     return ReportListOut(
         reports=[_report_out(r) for r in reports], total=len(reports)
     )
@@ -487,7 +511,7 @@ async def list_reports(
 async def get_report(
     request: Request, report_id: str, principal: OptionalPrincipal = None
 ) -> ReportOut:
-    report = request.app.state.report_store.get(report_id)
+    report = await request.app.state.report_store.get(report_id)
     if report is None:
         raise ApiError(404, ErrorCode.NOT_FOUND, f"report '{report_id}' not found or expired")
     return _report_out(report)
@@ -501,7 +525,7 @@ async def edit_report(
     principal: OptionalPrincipal = None,
 ) -> ReportOut:
     try:
-        report = request.app.state.report_store.edit_sections(
+        report = await request.app.state.report_store.edit_sections(
             report_id, body.sections, user_id=principal.user_id if principal else None
         )
     except ReportStateError as exc:
@@ -523,7 +547,7 @@ async def acknowledge_warning(
     principal: OptionalPrincipal = None,
 ) -> ReportOut:
     try:
-        report = request.app.state.report_store.acknowledge(
+        report = await request.app.state.report_store.acknowledge(
             report_id,
             body.warning_id,
             body.justification,
@@ -545,7 +569,7 @@ async def finalize_report(
     request: Request, report_id: str, principal: OptionalPrincipal = None
 ) -> ReportOut:
     try:
-        report = request.app.state.report_store.finalize(
+        report = await request.app.state.report_store.finalize(
             report_id, user_id=principal.user_id if principal else None
         )
     except ReportStateError as exc:
@@ -561,7 +585,7 @@ async def approve_report(
     request: Request, report_id: str, principal: OptionalPrincipal = None
 ) -> ReportOut:
     try:
-        report = request.app.state.report_store.approve(
+        report = await request.app.state.report_store.approve(
             report_id, user_id=principal.user_id if principal else None
         )
     except ReportStateError as exc:
@@ -577,7 +601,7 @@ async def reopen_report(
     request: Request, report_id: str, principal: OptionalPrincipal = None
 ) -> ReportOut:
     try:
-        report = request.app.state.report_store.reopen(
+        report = await request.app.state.report_store.reopen(
             report_id, user_id=principal.user_id if principal else None
         )
     except ReportStateError as exc:
@@ -593,7 +617,7 @@ async def amend_report(
     request: Request, report_id: str, principal: OptionalPrincipal = None
 ) -> ReportOut:
     try:
-        report = request.app.state.report_store.amend(
+        report = await request.app.state.report_store.amend(
             report_id, user_id=principal.user_id if principal else None
         )
     except ReportStateError as exc:
@@ -605,6 +629,28 @@ async def amend_report(
         user_id=principal.user_id if principal else None,
     )
     return _report_out(report)
+
+
+@router.get("/{report_id}/revisions")
+async def report_revisions(
+    request: Request, report_id: str, principal: OptionalPrincipal = None
+) -> dict:
+    """Append-only revision log (clinician edits + lifecycle actions)."""
+    report = await request.app.state.report_store.get(report_id)
+    if report is None:
+        raise ApiError(404, ErrorCode.NOT_FOUND, f"report '{report_id}' not found or expired")
+    repo = getattr(request.app.state, "report_repo", None)
+    if repo is None:
+        # in-memory mode: surface the live event log (same shape)
+        return {
+            "report_id": report_id,
+            "revisions": [
+                {"id": str(i), "action": e.action, "user_id": e.user_id,
+                 "detail": e.detail, "at": e.at}
+                for i, e in enumerate(report.events)
+            ],
+        }
+    return {"report_id": report_id, "revisions": await repo.revisions(report_id)}
 
 
 def _state_error(exc: ReportStateError) -> ApiError:

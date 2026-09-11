@@ -37,9 +37,10 @@ db = [
 cache = [
     "redis>=5.0",
 ]
-# Phase 7 — password hashing
+# Phase 7 — password hashing + provider-secret encryption
 security = [
     "argon2-cffi>=23.1",
+    "cryptography>=42.0",
 ]
 
 [build-system]
