@@ -18,6 +18,7 @@ dependencies = [
     # Phase 3: multipart upload parsing + outbound WS to cloud STT providers
     "python-multipart>=0.0.9",
     "websockets>=12",
+    "anyio>=4.3",  # direct: ClosedResourceError guard on WS sends (starlette transit anyway)
 ]
 
 [project.optional-dependencies]

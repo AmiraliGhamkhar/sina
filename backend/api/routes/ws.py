@@ -17,6 +17,7 @@ import json
 import logging
 import time
 
+import anyio
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import ValidationError
 
@@ -56,8 +57,17 @@ async def transcribe_socket(websocket: WebSocket) -> None:
     send_lock = asyncio.Lock()
 
     async def send_frame(frame: dict) -> None:
+        # Sends racing a client disconnect are a normal teardown interleaving
+        # (the loop below notices the disconnect via _recv and unwinds).
+        # Starlette surfaces that race as ClosedResourceError/RuntimeError —
+        # swallowing here keeps it out of both the hub pump task and TestClient
+        # portals, which would otherwise re-raise it as an app crash.
         async with send_lock:
-            await websocket.send_json(frame)
+            try:
+                await websocket.send_json(frame)
+            except (WebSocketDisconnect, anyio.ClosedResourceError, RuntimeError):
+                metrics.incr("ws_send_after_close")
+                logger.debug("dropped frame for closed socket: %s", frame.get("type"))
 
     try:
         session, hub = await _handshake(websocket, principal.user_id, send_frame)

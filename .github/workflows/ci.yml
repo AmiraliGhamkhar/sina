@@ -82,14 +82,9 @@ jobs:
 
       # setup-dotnet's NuGet cache step hard-fails when ~/.nuget/packages
       # does not exist yet (fresh runner, pre-restore).
-      - name: Ensure nuget cache dir exists
-        run: mkdir -p "$HOME/.nuget/packages"
-
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "10.0.x"
-          cache: true
-          cache-dependency-path: client/**.csproj
 
       # EnableWindowsTargeting in both csproj files makes this a pure-compile
       # gate: catches C#/XAML codegen regressions without a Windows runner.
@@ -117,15 +112,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Ensure nuget cache dir exists
-        shell: bash
-        run: mkdir -p "$HOME/.nuget/packages"
-
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "10.0.x"
-          cache: true
-          cache-dependency-path: client/**.csproj
 
       - name: Restore
         run: dotnet restore client/MedicalScribe.sln
