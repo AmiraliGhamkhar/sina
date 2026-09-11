@@ -1,0 +1,136 @@
+name: CI
+
+# One workflow for the whole repo (docs PRs also run it — jobs are cheap and
+# branch protection needs a stable, always-expected check set):
+#   backend        pytest + ruff on the two supported Pythons
+#   client-linux   C# compile gate via EnableWindowsTargeting (fast feedback
+#                  for syntax/binding errors without waiting for the Windows queue)
+#   client-windows dotnet build + xunit tests for the WPF projects (real run)
+#   docker         compose config + API image build + import smoke
+
+on:
+  push:
+    branches: [main, "arena/**"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  DOTNET_NOLOGO: "true"
+  DOTNET_CLI_TELEMETRY_OPTOUT: "true"
+
+jobs:
+  backend:
+    name: Backend & AI · pytest + ruff (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # >=3.11 is supported; production target is 3.12 (see pyproject note
+        # and infrastructure/docker/Dockerfile.api)
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install (editable + dev extras)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Lint (ruff)
+        run: ruff check ai backend tests
+
+      - name: Tests (pytest)
+        run: python -m pytest -r fx --color=yes
+
+  client-linux:
+    name: WPF client · compile check (Linux targeting pack)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+          cache: true
+          cache-dependency-path: client/**.csproj
+
+      # EnableWindowsTargeting in both csproj files makes this a pure-compile
+      # gate: catches C#/XAML codegen regressions without a Windows runner.
+      - name: Build (Release)
+        run: dotnet build client/MedicalScribe.sln -c Release --verbosity minimal
+
+  client-windows:
+    name: WPF client · build + tests (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    needs: client-linux # skip the Windows queue unless it even compiles
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+          cache: true
+          cache-dependency-path: client/**.csproj
+
+      - name: Restore
+        run: dotnet restore client/MedicalScribe.sln
+
+      - name: Build (Release)
+        run: dotnet build client/MedicalScribe.sln -c Release --no-restore
+
+      - name: Test (xunit — parser, reconnect policy, transcript sink)
+        run: >-
+          dotnet test client/MedicalScribe.WPF.Tests/MedicalScribe.WPF.Tests.csproj
+          -c Release --no-build
+          --logger "trx;LogFileName=client-tests.trx"
+          --results-directory TestResults
+
+      - name: Upload test results (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: client-test-results-windows
+          path: TestResults/*.trx
+          if-no-files-found: ignore
+
+  docker:
+    name: Packaging · compose config + API image
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate docker-compose.yml
+        run: |
+          touch .env   # compose requires the env_file to exist for `config`
+          docker compose -f docker-compose.yml config --quiet
+          echo "compose config: OK"
+
+      - name: Build API image
+        run: docker build -t medicalscribe-api:ci -f infrastructure/docker/Dockerfile.api .
+
+      - name: Import smoke inside the image
+        run: >-
+          docker run --rm medicalscribe-api:ci
+          python -c "import api.main, ai.registry;
+          r = ai.registry.build_default_registry();
+          assert len(r) >= 10, f'registry too small: {len(r)}';
+          print('image imports OK, providers:', len(r))"
