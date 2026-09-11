@@ -30,8 +30,15 @@ from collections.abc import Awaitable, Callable
 from dataclasses import replace
 
 from ai.base import ProviderError, STTProvider, TranscriptSegment
-from api.schemas.ws import ErrorFrame, TranscriptFinal, TranscriptInterim, WarningFrame
+from api.schemas.ws import (
+    CommandDetected,
+    ErrorFrame,
+    TranscriptFinal,
+    TranscriptInterim,
+    WarningFrame,
+)
 from api.services.transcript_store import TranscriptStore
+from api.services.voice_commands import CommandRuntime
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +73,7 @@ class TranscriptionHub:
         channels: int = 1,
         provider_factory=None,
         fallback_chain: list[str] | None = None,
+        command_service=None,
     ) -> None:
         # Phase 5 runtime fallback: `fallback_chain` holds the router's ordered
         # fallback provider names (already privacy-filtered by route());
@@ -96,6 +104,15 @@ class TranscriptionHub:
         self._pending_id: str | None = None
         self._started_at = time.time()
         self._stream_failed = False
+        # Phase 6 voice commands: final segments pass through the parser;
+        # command utterances never enter the transcript as dictated text.
+        self._commands = command_service
+        # Voice-pause (distinct from the control-frame pause, which buffers
+        # audio): audio keeps flowing so the resume command stays audible,
+        # but non-command finals are suppressed from the transcript.
+        self._voice_paused = False
+        self._voice_paused_dropped = 0
+        self._command_count = 0
 
     # -- lifecycle -----------------------------------------------------------
 
@@ -142,6 +159,8 @@ class TranscriptionHub:
             "interim_frames": self._interim_count,
             "final_segments": self._final_count,
             "stream_failed": self._stream_failed,
+            "voice_commands": self._command_count,
+            "voice_paused_dropped_segments": self._voice_paused_dropped,
             "duration_ms": int((time.time() - self._started_at) * 1000),
         }
 
@@ -327,7 +346,74 @@ class TranscriptionHub:
             result = await result
         return result  # type: ignore[return-value]
 
+    def _voice_pause(self) -> None:
+        self._voice_paused = True
+
+    def _voice_resume(self) -> None:
+        self._voice_paused = False
+
+    async def _process_command(self, segment: TranscriptSegment) -> bool:
+        """Returns True when the segment was consumed as a command (caller
+        must NOT store/emit it as transcript text)."""
+        if self._commands is None:
+            return False
+        outcome = self._commands.process_final(
+            segment.text,
+            CommandRuntime(
+                store=self._store,
+                session_id=self.session_id,
+                recording=not self._closed,
+                voice_paused=self._voice_paused,
+                pause=self._voice_pause,
+                resume=self._voice_resume,
+            ),
+        )
+        if outcome is None:
+            return False  # plain clinical speech
+        if not outcome.executed:
+            # ambiguous trigger inside speech — keep the text, warn
+            await self._send(
+                WarningFrame(
+                    session_id=self.session_id,
+                    code=outcome.warning_code or "COMMAND_AMBIGUOUS",
+                    message=outcome.warning_message or "ambiguous command trigger",
+                    segment_id=segment.segment_id,
+                ).model_dump(mode="json")
+            )
+            return False
+        self._command_count += 1
+        self._metrics.incr("voice_commands_executed")
+        self._metrics.incr(f"voice_command:{outcome.command_id}")
+        await self._send(
+            CommandDetected(
+                session_id=self.session_id,
+                command=outcome.command_id,
+                args=outcome.args or {},
+                utterance_text=outcome.utterance_text,
+                segment_id=segment.segment_id,
+            ).model_dump(mode="json")
+        )
+        if outcome.warning_code:
+            await self._send(
+                WarningFrame(
+                    session_id=self.session_id,
+                    code=outcome.warning_code,
+                    message=outcome.warning_message or outcome.note,
+                    segment_id=segment.segment_id,
+                ).model_dump(mode="json")
+            )
+        return True
+
     async def _emit(self, segment: TranscriptSegment) -> None:
+        # Phase 6: voice-pause suppresses interims and plain finals; the
+        # resume command stays audible because it is parsed BEFORE suppression.
+        if self._voice_paused and not segment.is_final:
+            return
+        if segment.is_final and await self._process_command(segment):
+            return
+        if self._voice_paused:
+            self._voice_paused_dropped += 1
+            return
         # Stable per-utterance id: the first interim of an utterance opens it,
         # the final closes it. Provider-supplied ids always win.
         if segment.segment_id:

@@ -18,6 +18,10 @@ class TranscriptSegmentDto(BaseModel):
     edited: bool = False
     revision: int = 0
     updated_at: str | None = None
+    #: Phase 6 — dictated vs voice-command markers (paragraph/section/…)
+    kind: str = "dictated"
+    #: marker payload, e.g. {"section_title": "طرح درمان"} (None for dictation)
+    meta: dict | None = None
 
 
 class TranscriptResponse(BaseModel):
@@ -28,6 +32,24 @@ class TranscriptResponse(BaseModel):
     segment_count: int = 0
     audio_duration_ms: int = 0
     segments: list[TranscriptSegmentDto] = Field(default_factory=list)
+
+
+class TranscriptSummary(BaseModel):
+    """Listing view (GET /transcripts?encounter_id=…) — no segment payloads."""
+
+    session_id: str
+    provider: str | None = None
+    language: str | None = None
+    status: str = "open"
+    segment_count: int = 0
+    audio_duration_ms: int = 0
+    started_at: str | None = None
+    ended_at: str | None = None
+
+
+class TranscriptListResponse(BaseModel):
+    transcripts: list[TranscriptSummary] = Field(default_factory=list)
+    total: int = 0
 
 
 class SegmentEditRequest(BaseModel):

@@ -52,6 +52,8 @@
                 <Button Content="Load transcript into buffer" Style="{StaticResource SecondaryButton}" Command="{Binding LoadTranscriptIntoBufferCommand}"/>
                 <Button Content="Apply buffer to transcript" Command="{Binding ApplyBufferToTranscriptCommand}"/>
                 <Button Content="New paragraph" Style="{StaticResource SecondaryButton}" Command="{Binding InsertNewParagraphCommand}"/>
+                <Button Content="Terminology preview (server)" Style="{StaticResource SecondaryButton}" Margin="8,0,0,0" Command="{Binding NormalizePreviewCommand}"
+                        ToolTip="Reversible server-side canonicalization preview (ام‌آرآی → MRI); the stored transcript keeps the original"/>
             </StackPanel>
             <ListBox HorizontalAlignment="Right" Width="300" Height="90" ItemsSource="{Binding CommandLog}" BorderThickness="0" Background="Transparent">
                 <ListBox.ItemTemplate>

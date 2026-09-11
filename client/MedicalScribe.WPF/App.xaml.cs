@@ -17,6 +17,7 @@ using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Threading;
 using MedicalScribe.WPF.Infrastructure;
+using MedicalScribe.WPF.Settings;
 using MedicalScribe.WPF.ViewModels;
 using MedicalScribe.WPF.Views;
 using Microsoft.Extensions.DependencyInjection;
@@ -39,6 +40,24 @@ public partial class App : Application
                 LogCrash(ex);
             }
         };
+
+        // Phase 8 first-run wizard: runs BEFORE the container is built so the
+        // HttpClient gets the saved base address (no post-hoc re-wiring). Any
+        // wizard failure falls through to normal startup with defaults.
+        try
+        {
+            var preStore = new JsonSettingsStore();
+            preStore.Load();
+            if (preStore.Current.IsFirstRun)
+            {
+                var wizard = new FirstRunWindow(preStore);
+                wizard.ShowDialog();
+            }
+        }
+        catch (Exception ex)
+        {
+            LogCrash(ex);
+        }
 
         var container = new ServiceCollection()
             .AddMedicalScribeClient()

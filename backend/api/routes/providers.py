@@ -12,17 +12,19 @@ from fastapi import APIRouter, Query, Request
 from ai.base import ProviderKind
 from api.auth.deps import OptionalPrincipal
 from api.schemas.providers import ProviderCapabilitiesInfo, ProviderHealthInfo, ProviderInfo
+from api.services.ai_bridge import provider_config_with_secrets
 
 router = APIRouter(prefix="/providers", tags=["providers"])
 
 
-def _describe(request: Request, kind: ProviderKind) -> list[ProviderInfo]:
+async def _describe(request: Request, kind: ProviderKind) -> list[ProviderInfo]:
     state = request.app.state
-    settings = state.settings
     registry = state.ai_registry
     out: list[ProviderInfo] = []
     for d in registry.descriptors(kind):
-        cfg = settings.provider_config(kind.value, d.name)
+        from api.services.ai_bridge import provider_config_with_secrets
+
+        cfg = await provider_config_with_secrets(request.app, kind.value, d.name)
         caps = d.capabilities
         out.append(
             ProviderInfo(
@@ -52,7 +54,7 @@ async def list_providers(
     kinds = [ProviderKind(kind)] if kind else list(ProviderKind)
     infos: list[ProviderInfo] = []
     for k in kinds:
-        infos.extend(_describe(request, k))
+        infos.extend(await _describe(request, k))
 
     if probe == "health":
         state = request.app.state
@@ -62,7 +64,7 @@ async def list_providers(
                 provider = state.ai_registry.create(
                     ProviderKind(info.kind),
                     info.name,
-                    state.settings.provider_config(info.kind, info.name),
+                    await provider_config_with_secrets(request.app, info.kind, info.name),
                 )
                 health = await asyncio.wait_for(provider.health(), timeout=5.0)
                 info.health = ProviderHealthInfo(

@@ -26,13 +26,24 @@ from ai.router import NoEligibleProviderError
 from api.auth.deps import websocket_principal
 from api.errors import ErrorCode, ws_error_frame
 from api.schemas.ws import AudioChunk, SessionCompleted, SessionStart, SessionStarted, _SessionCtl
-from api.services.ai_bridge import select_stt_provider
+from api.services.ai_bridge import provider_config_with_secrets, select_stt_provider
 from api.services.session_registry import WsSession
 from api.services.transcription_hub import TranscriptionHub
 from api.version import WS_PROTOCOL_MIN
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+def _provider_factory(app):
+    """Fallback instantiation goes through the vault-aware config path."""
+
+    async def _create(name: str):
+        return app.state.ai_registry.create(
+            ProviderKind.STT, name, await provider_config_with_secrets(app, "stt", name)
+        )
+
+    return _create
+
 
 WS_CLOSE_POLICY_VIOLATION = 4400
 WS_CLOSE_UNAUTHORIZED = 4401
@@ -88,7 +99,51 @@ async def transcribe_socket(websocket: WebSocket) -> None:
                 logger.debug("hub stop failed during cleanup", exc_info=True)
         if session is not None:
             websocket.app.state.sessions.remove(session.session_id)
+            websocket.app.state.transcript_store.close(session.session_id)
+            # shielded: transport teardown may cancel this scope mid-await
+            # (client dropping the socket) — the durable write must survive
+            flush = asyncio.create_task(
+                _flush_transcript_db(websocket.app, session.session_id)
+            )
+            try:
+                await asyncio.shield(flush)
+            except asyncio.CancelledError:
+                logger.debug(
+                    "socket teardown raced the transcript flush; write continues detached"
+                )
             metrics.set_gauge("ws_connections_active", websocket.app.state.sessions.count())
+
+
+async def _flush_transcript_db(app, session_id: str) -> None:
+    """Phase 7 write-through: persist the finished session (idempotent upsert).
+
+    Runs after socket teardown so a slow DB never delays the client-facing
+    session.completed frame. Failures count a metric and never raise — the
+    in-memory buffer stays authoritative for the current process."""
+    repo = getattr(app.state, "transcript_repo", None)
+    if repo is None:
+        return
+    store = app.state.transcript_store
+    t = store.get(session_id)
+    if t is None:
+        return
+    summary = t.summary()
+    try:
+        await repo.flush(
+            session_id=t.session_id,
+            user_id=t.user_id,
+            provider=t.provider,
+            language=t.language,
+            status=summary["status"],
+            started_at=t.started_at,
+            ended_at=t.ended_at,
+            audio_duration_ms=summary["audio_duration_ms"],
+            encounter_id=t.encounter_id,
+            segments=summary["segments"],
+        )
+    except Exception:  # noqa: BLE001 — clinical flow never breaks on DB lag
+        app.state.metrics.incr("transcript_db_write_failures")
+        logger.exception("transcript db flush failed session=%s", session_id)
 
 
 async def _recv(websocket: WebSocket, timeout: float) -> tuple[str, object] | None:
@@ -175,6 +230,21 @@ async def _handshake(
         await websocket.close(code=WS_CLOSE_POLICY_VIOLATION)
         return None, None
 
+    # Phase 7 per-user concurrent session cap (spec §14) — reject before any
+    # provider work: an over-limit user must not start a 6th stream at all
+    sessions = websocket.app.state.sessions
+    cap = websocket.app.state.settings.rate_limit.ws_sessions_per_user
+    if sessions.count_for_user(user_id) >= cap:
+        await send_frame(
+            ws_error_frame(
+                ErrorCode.RATE_LIMITED,
+                f"session limit reached ({cap} concurrent per user)",
+                recoverable=False,
+            )
+        )
+        await websocket.close(code=WS_CLOSE_POLICY_VIOLATION)
+        return None, None
+
     # provider selection goes through the AI router — never a direct pick
     try:
         decision, provider = await select_stt_provider(websocket, start)
@@ -188,7 +258,9 @@ async def _handshake(
         await websocket.close(code=WS_CLOSE_UNAVAILABLE)
         return None, None
 
-    session = websocket.app.state.sessions.create(user_id=user_id, provider=decision.provider)
+    session = websocket.app.state.sessions.create(
+        user_id=user_id, provider=decision.provider
+    )
     session.state = "recording"
     metrics = websocket.app.state.metrics
     metrics.incr("ws_sessions_started")
@@ -205,6 +277,7 @@ async def _handshake(
         user_id=user_id,
         provider=decision.provider,
         language=start.language,
+        encounter_id=start.encounter_id,
     )
     # Phase 5 runtime fallback: the hub may transparently switch to the
     # router's fallback names (already privacy-filtered by route()) if the
@@ -221,9 +294,8 @@ async def _handshake(
         sample_rate=sample_rate,
         channels=channels,
         fallback_chain=list(decision.fallbacks) if settings.routing.fallback_enabled else [],
-        provider_factory=lambda name: websocket.app.state.ai_registry.create(
-            ProviderKind.STT, name, settings.provider_config("stt", name)
-        ),
+        provider_factory=_provider_factory(websocket.app),
+        command_service=getattr(websocket.app.state, "voice_commands", None),
     )
     # started frame first, pump second: deterministic ordering of the first
     # control frame vs provider transcript frames (no race on session.started)
@@ -259,17 +331,37 @@ async def _media_loop(
     settings = websocket.app.state.settings
     metrics = websocket.app.state.metrics
     max_s = settings.websocket.max_session_minutes * 60
-    recv_timeout = float(settings.websocket.heartbeat_seconds * 3)
+    # Phase 8 app-level keepalive: wait one heartbeat interval per recv; on
+    # idle send heartbeat.ping. The hard idle close (4408) still fires after
+    # 3 consecutive silent intervals (same window as before) — pings keep
+    # intermediaries (nginx read timeout, NATs) from reaping a live-but-quiet
+    # dictation session and give the client a liveness signal.
+    recv_timeout = float(settings.websocket.heartbeat_seconds)
+    max_missed = 3
+    missed = 0
     last_audio_at = time.time()
 
     while True:
         received = await _recv(websocket, timeout=recv_timeout)
         if received is None:
+            missed += 1
+            if missed >= max_missed:
+                await send_frame(
+                    ws_error_frame(ErrorCode.SESSION_STATE, "idle timeout", recoverable=False)
+                )
+                await websocket.close(code=WS_CLOSE_TIMEOUT)
+                return
+            metrics.incr("ws_heartbeat_pings")
             await send_frame(
-                ws_error_frame(ErrorCode.SESSION_STATE, "idle timeout", recoverable=False)
+                {
+                    "v": 1,
+                    "type": "heartbeat.ping",
+                    "session_id": session.session_id,
+                    "server_time_ms": int(time.time() * 1000),
+                }
             )
-            await websocket.close(code=WS_CLOSE_TIMEOUT)
-            return
+            continue
+        missed = 0
 
         kind, payload = received
         if kind == "bytes":

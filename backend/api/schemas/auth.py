@@ -23,6 +23,11 @@ class RefreshRequest(BaseModel):
     refresh_token: str = Field(min_length=1)
 
 
+class LogoutRequest(BaseModel):
+    """Optional body: pass the refresh token to revoke it server-side."""
+    refresh_token: str | None = Field(default=None, max_length=4096)
+
+
 class PrincipalInfo(BaseModel):
     user_id: str
     role: str

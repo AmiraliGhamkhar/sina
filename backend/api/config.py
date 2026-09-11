@@ -11,7 +11,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import BaseModel, Field, SecretStr
+from pydantic import BaseModel, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -40,12 +40,36 @@ class AuthConfig(BaseModel):
     #: dev-only static bearer token accepted as the "dev operator" principal.
     #: Never enabled when env == "production".
     dev_token: SecretStr | None = None
+    # Phase 7 — credential auth
+    argon2_time_cost: int = 3
+    argon2_memory_cost: int = 65536  # KiB
+    argon2_parallelism: int = 4
+    lockout_max_failures: int = 5
+    lockout_seconds: int = 300
+    #: bootstrap the admin user when a password is provided (never defaulted)
+    bootstrap_admin_username: str = "admin"
+    bootstrap_admin_password: SecretStr | None = None
 
 
 class DatabaseConfig(BaseModel):
     url: str | None = None  # postgresql+asyncpg://user:pw@host:5432/medicalscribe
     echo: bool = False
     pool_size: int = 10
+    #: create_all on boot (dev convenience). Production uses alembic migrations.
+    auto_create: bool = True
+
+
+class SecurityConfig(BaseModel):
+    """Phase 7 — provider-secret encryption key (Fernet). Server-side only."""
+
+    secret_encryption_key: SecretStr | None = None
+
+
+class ObservabilityConfig(BaseModel):
+    """Phase 8 — /metrics is always on; OTel tracing is opt-in (needs the
+    `observability` extra) and follows the standard OTLP env contract."""
+
+    otel_enabled: bool = False
 
 
 class RedisConfig(BaseModel):
@@ -57,6 +81,8 @@ class RateLimitConfig(BaseModel):
     requests_per_minute: int = 120
     auth_per_minute: int = 10
     window_seconds: int = 60
+    #: max simultaneous WS transcription sessions per user (spec §14)
+    ws_sessions_per_user: int = 5
 
 
 class LlamaServerConfig(BaseModel):
@@ -223,10 +249,26 @@ class Settings(BaseSettings):
     routing: RoutingConfig = Field(default_factory=RoutingConfig)
     websocket: WebsocketConfig = Field(default_factory=WebsocketConfig)
     audit: AuditConfig = Field(default_factory=AuditConfig)
+    security: SecurityConfig = Field(default_factory=SecurityConfig)
+    observability: ObservabilityConfig = Field(default_factory=ObservabilityConfig)
 
     @property
     def is_production(self) -> bool:
         return self.server.env == "production"
+
+    @model_validator(mode="after")
+    def _production_fail_closed(self) -> Settings:
+        """Production must carry real auth material — enforced on the MODEL so
+        direct Settings(...) construction cannot bypass it (the loader's check
+        stays as a redundant belt-and-braces)."""
+        if self.is_production:
+            secret = self.auth.jwt_secret
+            if secret is None or len(secret.get_secret_value()) < 32:
+                raise ValueError(
+                    "production requires MS_AUTH__JWT_SECRET with >= 32 chars "
+                    "(openssl rand -base64 48)"
+                )
+        return self
 
     def provider_config(self, kind: str, name: str) -> dict:
         """Project the settings slice for a provider into the factory dict.
@@ -331,11 +373,6 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    settings = Settings()
-    # fail-closed: production must have real auth material
-    if settings.is_production:
-        if not settings.auth.jwt_secret or len(settings.auth.jwt_secret.get_secret_value()) < 32:
-            raise RuntimeError(
-                "production requires MS_AUTH__JWT_SECRET with >= 32 chars (openssl rand -base64 48)"
-            )
-    return settings
+    # production's fail-closed secret check is a model validator — it fires
+    # here and on every direct Settings(...) construction alike
+    return Settings()

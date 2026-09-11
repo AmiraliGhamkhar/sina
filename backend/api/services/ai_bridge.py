@@ -32,6 +32,29 @@ if TYPE_CHECKING:
     from ai.base import STTProvider
 
 
+async def provider_config_with_secrets(app, kind: str, name: str) -> dict:
+    """settings.provider_config + vault-stored provider secret.
+
+    The single consumption point for stored secrets (services/secrets.py):
+    the decrypted key lands in the factory dict here and nowhere else —
+    the returned dict may contain raw keys and must never be logged.
+    """
+    cfg = dict(app.state.settings.provider_config(kind, name))
+    vault = getattr(app.state, "secret_vault", None)
+    provider_repo = getattr(app.state, "provider_repo", None)
+    if vault is None or not vault.enabled or provider_repo is None:
+        return cfg
+    try:
+        ciphertext = await provider_repo.get_secret(kind, name)
+        if ciphertext:
+            secret = vault.decrypt(ciphertext)
+            if secret:
+                cfg["api_key"] = secret
+    except Exception:  # noqa: BLE001 — a broken vault must not break routing
+        pass
+    return cfg
+
+
 def budget_exhausted(app) -> bool:
     """Cost-ledger soft stop signal (Phase 5). Missing ledger (tests, shells)
     simply means "no budget configured"."""
@@ -39,17 +62,18 @@ def budget_exhausted(app) -> bool:
     return bool(ledger is not None and ledger.exhausted)
 
 
-def build_candidates(app, kind: ProviderKind) -> list[ProviderCandidate]:
+async def build_candidates(app, kind: ProviderKind) -> list[ProviderCandidate]:
     """Flatten registry descriptors into pure routing candidates, enriched
     with live health + observed EWMA latency (tracker keys are
-    ``"{kind}:{provider}"``)."""
-    settings = app.state.settings
+    ``"{kind}:{provider}"``). Secret presence (env or vault) counts as
+    configured."""
     registry = app.state.ai_registry
     health = app.state.provider_health
     latencies = health.latency_map() if hasattr(health, "latency_map") else {}
     candidates: list[ProviderCandidate] = []
     for d in registry.descriptors(kind):
-        configured = registry.is_configured(kind, d.name, settings.provider_config(kind.value, d.name))
+        cfg = await provider_config_with_secrets(app, kind.value, d.name)
+        configured = registry.is_configured(kind, d.name, cfg)
         if not configured:
             continue
         candidates.append(
@@ -142,11 +166,11 @@ def llm_route_request(
 
 async def select_llm_provider(app, request: RouteRequest) -> tuple[RouteDecision, Any]:
     """Route + materialize an LLM provider. Raises RoutingError/ProviderError."""
-    candidates = build_candidates(app, ProviderKind.LLM)
+    candidates = await build_candidates(app, ProviderKind.LLM)
     decision = route(request, candidates)
-    settings = app.state.settings
     provider = app.state.ai_registry.create(
-        ProviderKind.LLM, decision.provider, settings.provider_config("llm", decision.provider)
+        ProviderKind.LLM, decision.provider,
+        await provider_config_with_secrets(app, "llm", decision.provider),
     )
     return decision, provider
 
@@ -158,10 +182,10 @@ async def select_stt_provider(
     propagates so the route answers ``PROVIDER_UNAVAILABLE`` before the
     session is announced."""
     app = websocket.app
-    candidates = build_candidates(app, ProviderKind.STT)
+    candidates = await build_candidates(app, ProviderKind.STT)
     decision = route(stt_route_request(app, start), candidates)
-    settings = app.state.settings
     provider = app.state.ai_registry.create(
-        ProviderKind.STT, decision.provider, settings.provider_config("stt", decision.provider)
+        ProviderKind.STT, decision.provider,
+        await provider_config_with_secrets(app, "stt", decision.provider),
     )
     return decision, provider

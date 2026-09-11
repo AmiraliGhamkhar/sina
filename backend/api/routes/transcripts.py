@@ -3,17 +3,21 @@
 GET    /api/v1/transcripts/{session_id}
 PATCH  /api/v1/transcripts/{session_id}/segments/{segment_id}
 
-Session scoping/enforcement, persistence and revision-conflict handling land
-with PostgreSQL + JWT user identity in Phase 7; the response contract here is
-already final.
+Phase 7 persistence: the in-memory store stays the live-session buffer;
+GET falls back to the durable ``transcripts`` rows after the memory LRU
+evicts, and PATCH edits write through to the database when configured.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Query, Request
 
 from api.auth.deps import OptionalPrincipal
 from api.errors import ApiError, ErrorCode
-from api.schemas.transcripts import SegmentEditRequest, TranscriptResponse
+from api.schemas.transcripts import (
+    SegmentEditRequest,
+    TranscriptListResponse,
+    TranscriptResponse,
+)
 
 router = APIRouter(prefix="/transcripts", tags=["transcripts"])
 
@@ -22,9 +26,35 @@ def _store(request: Request):
     return request.app.state.transcript_store
 
 
+@router.get("", response_model=TranscriptListResponse)
+async def list_transcripts(
+    request: Request,
+    principal: OptionalPrincipal,
+    encounter_id: str = Query(min_length=1, max_length=64),
+    limit: int = Query(default=50, ge=1, le=200),
+) -> TranscriptListResponse:
+    """Encounter-scoped listing (Phase 8): live in-memory sessions first,
+    then durable rows (deduped) — works in memory-only mode too."""
+    summaries = _store(request).summaries_for_encounter(encounter_id)
+    seen = {s["session_id"] for s in summaries}
+    repo = getattr(request.app.state, "transcript_repo", None)
+    if repo is not None:
+        try:
+            durable = await repo.list_by_encounter(encounter_id, limit=limit)
+        except Exception:  # noqa: BLE001 — listing never breaks on DB lag
+            request.app.state.metrics.incr("transcript_db_write_failures")
+            durable = []
+        summaries.extend(r for r in durable if r["session_id"] not in seen)
+    return TranscriptListResponse(transcripts=summaries[:limit], total=len(summaries))
+
+
 @router.get("/{session_id}", response_model=TranscriptResponse)
 async def get_transcript(request: Request, session_id: str, principal: OptionalPrincipal) -> TranscriptResponse:
     snapshot = _store(request).snapshot(session_id)
+    if snapshot is None:
+        repo = getattr(request.app.state, "transcript_repo", None)
+        if repo is not None:
+            snapshot = await repo.snapshot(session_id)  # durable fallback (P7)
     if snapshot is None:
         raise ApiError(404, ErrorCode.NOT_FOUND, f"transcript '{session_id}' not found or expired")
     return TranscriptResponse(**snapshot)
@@ -45,6 +75,16 @@ async def edit_segment(
         if snapshot is None:
             raise ApiError(404, ErrorCode.NOT_FOUND, f"transcript '{session_id}' not found or expired")
         raise ApiError(404, ErrorCode.NOT_FOUND, f"segment '{segment_id}' not found")
+    # durable write-through (P7): the memory store is authoritative while the
+    # session is live; the DB copy serves post-eviction reads
+    repo = getattr(request.app.state, "transcript_repo", None)
+    if repo is not None:
+        try:
+            await repo.update_segment(
+                session_id, segment_id, text=updated.text, revision=updated.revision
+            )
+        except Exception:  # noqa: BLE001 — persistence lag never blocks a clinician edit
+            request.app.state.metrics.incr("transcript_db_write_failures")
     # audit: who changed what kind of field — content stays out (deny-list)
     request.app.state.audit.emit(
         "transcript_segment_edited",

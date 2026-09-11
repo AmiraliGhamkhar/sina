@@ -15,7 +15,6 @@ using System.Net.WebSockets;
 // WebSocket frame model + pure parser for server→client frames
 // (docs/WEBSOCKET_PROTOCOL.md v1). Deliberately allocation-light and
 // UI-free so it is unit-testable on any runner.
-using System.Text.Json;
 
 namespace MedicalScribe.WPF.Services;
 
@@ -34,8 +33,14 @@ public sealed record WsFinalEvent(
     string Text, string SegmentId, int StartMs, int EndMs, string? Language, double? Confidence)
     : WsEvent("transcript.final");
 
-public sealed record WsCommandEvent(string Command, IReadOnlyList<string> Args, string? TargetSegmentId)
-    : WsEvent("transcript.command");
+/// <summary>Voice command recognized server-side (protocol v1: type
+/// "command.detected"). Args is a dict (e.g. {"section_title": "طرح"}).</summary>
+public sealed record WsCommandEvent(
+    string Command,
+    IReadOnlyDictionary<string, string> Args,
+    string UtteranceText,
+    string? SegmentId)
+    : WsEvent("command.detected");
 
 public sealed record WsWarningEvent(string Code, string Message, string? SegmentId)
     : WsEvent("warning");
@@ -49,6 +54,8 @@ public sealed record WsAckEvent(string AckFor, string? State) : WsEvent("ack");
 
 public sealed record WsCompletedEvent(int SegmentCount, long DurationMs, string? Provider)
     : WsEvent("session.completed");
+
+public sealed record WsHeartbeatEvent(long ServerTimeMs) : WsEvent("heartbeat.ping");
 
 public sealed record WsUnknownEvent(string UnknownType) : WsEvent("unknown");
 
@@ -91,8 +98,9 @@ public static class WsFrameParser
                     Str(root, "text") ?? "", Str(root, "segment_id") ?? "", Int(root, "start_ms"),
                     Int(root, "end_ms"), Str(root, "language"), Dbl(root, "confidence"))
                 { SessionId = sessionId },
-                "transcript.command" => new WsCommandEvent(
-                    Str(root, "command") ?? "", Arr(root, "args"), Str(root, "target_segment_id"))
+                "command.detected" => new WsCommandEvent(
+                    Str(root, "command") ?? "", StrDict(root, "args"),
+                    Str(root, "utterance_text") ?? "", Str(root, "segment_id"))
                 { SessionId = sessionId },
                 "warning" => new WsWarningEvent(
                     Str(root, "code") ?? "", Str(root, "message") ?? "", Str(root, "segment_id"))
@@ -102,6 +110,8 @@ public static class WsFrameParser
                     Bool(root, "recoverable"), Str(root, "field"))
                 { SessionId = sessionId },
                 "ack" => new WsAckEvent(Str(root, "ack_for") ?? "", Str(root, "state"))
+                { SessionId = sessionId },
+                "heartbeat.ping" => new WsHeartbeatEvent(Long(root, "server_time_ms"))
                 { SessionId = sessionId },
                 "session.completed" => new WsCompletedEvent(
                     Int(root, "segment_count"), Long(root, "duration_ms"), Str(root, "provider"))
@@ -126,6 +136,23 @@ public static class WsFrameParser
 
     private static bool Bool(JsonElement e, string name) =>
         e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.True;
+
+    private static IReadOnlyDictionary<string, string> StrDict(JsonElement e, string name)
+    {
+        if (!e.TryGetProperty(name, out var v) || v.ValueKind != JsonValueKind.Object)
+        {
+            return new Dictionary<string, string>();
+        }
+        var dict = new Dictionary<string, string>();
+        foreach (var prop in v.EnumerateObject())
+        {
+            if (prop.Value.ValueKind == JsonValueKind.String)
+            {
+                dict[prop.Name] = prop.Value.GetString() ?? "";
+            }
+        }
+        return dict;
+    }
 
     private static IReadOnlyList<string> Arr(JsonElement e, string name)
     {

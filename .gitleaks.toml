@@ -1,0 +1,16 @@
+# Gitleaks configuration — repo-wide secret scan.
+# Test fixtures and the documented env template intentionally contain
+# synthetic tokens (dev-token-…, test-jwt-secret-…); they are excluded by
+# path. Everything else — application source, infra, client — is scanned,
+# including full git history.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Synthetic test fixtures and the documented env template"
+paths = [
+  '''(^|/)tests/''',
+  '''(^|/)client/MedicalScribe.WPF.Tests/''',
+  '''(^|/)\.env\.example$''',
+  '''(^|/)docs/''',
+]

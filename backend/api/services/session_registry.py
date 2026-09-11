@@ -72,6 +72,11 @@ class SessionRegistry:
         with self._lock:
             return len(self._sessions)
 
+    def count_for_user(self, user_id: str) -> int:
+        """Active sessions for one user (Phase 7 per-user WS cap, spec §14)."""
+        with self._lock:
+            return sum(1 for s in self._sessions.values() if s.user_id == user_id)
+
     def snapshot(self) -> list[dict]:
         with self._lock:
             return [s.snapshot() for s in self._sessions.values()]

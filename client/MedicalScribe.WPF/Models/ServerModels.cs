@@ -39,15 +39,17 @@ public sealed record VoiceCommandDto(
     [property: JsonPropertyName("id")] string Id,
     [property: JsonPropertyName("description")] string Description,
     [property: JsonPropertyName("triggers")] List<string> Triggers,
-    [property: JsonPropertyName("args")] List<string> Args);
+    [property: JsonPropertyName("args")] List<string> Args,
+    [property: JsonPropertyName("mode_prefixes")] List<string>? ModePrefixes = null);
 
 public sealed record FeatureFlagsDto(
     [property: JsonPropertyName("live_transcription")] bool LiveTranscription,
     [property: JsonPropertyName("voice_commands")] bool VoiceCommands,
     [property: JsonPropertyName("report_generation")] bool ReportGeneration,
-    [property: JsonPropertyName("editing_enabled")] bool EditingEnabled,
-    [property: JsonPropertyName("cloud_providers_enabled")] bool CloudProvidersEnabled,
-    [property: JsonPropertyName("audit_enabled")] bool AuditEnabled);
+    [property: JsonPropertyName("report_lifecycle")] bool ReportLifecycle = false,
+    [property: JsonPropertyName("editing_enabled")] bool EditingEnabled = true,
+    [property: JsonPropertyName("cloud_providers_enabled")] bool CloudProvidersEnabled = false,
+    [property: JsonPropertyName("audit_enabled")] bool AuditEnabled = true);
 
 public sealed record ClientManifestDto(
     [property: JsonPropertyName("server_version")] string ServerVersion,
@@ -59,7 +61,9 @@ public sealed record ClientManifestDto(
     [property: JsonPropertyName("languages")] List<LanguageOptionDto> Languages,
     [property: JsonPropertyName("features")] FeatureFlagsDto Features,
     [property: JsonPropertyName("voice_commands")] List<VoiceCommandDto> VoiceCommands,
-    [property: JsonPropertyName("routing_modes")] List<string> RoutingModes);
+    [property: JsonPropertyName("routing_modes")] List<string> RoutingModes,
+    [property: JsonPropertyName("report_statuses")] List<string>? ReportStatuses = null,
+    [property: JsonPropertyName("report_template_keys")] List<string>? ReportTemplateKeys = null);
 
 public sealed record ProviderCapabilitiesDto(
     [property: JsonPropertyName("privacy_class")] string PrivacyClass,
@@ -96,3 +100,83 @@ public sealed record PrincipalDto(
     [property: JsonPropertyName("user_id")] string UserId,
     [property: JsonPropertyName("role")] string Role,
     [property: JsonPropertyName("is_dev")] bool IsDev);
+
+// ---- Phase 6: report templates (GET /api/v1/report-templates) -------------------
+
+public sealed record TemplateSectionDto(
+    [property: JsonPropertyName("id")] string Id,
+    [property: JsonPropertyName("title")] string Title,
+    [property: JsonPropertyName("instruction")] string Instruction,
+    [property: JsonPropertyName("required")] bool Required,
+    [property: JsonPropertyName("format_style")] string FormatStyle);
+
+public sealed record ReportTemplateDto(
+    [property: JsonPropertyName("key")] string Key,
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("category")] string Category,
+    [property: JsonPropertyName("description")] string Description,
+    [property: JsonPropertyName("sections")] List<TemplateSectionDto> Sections,
+    [property: JsonPropertyName("builtin")] bool Builtin,
+    [property: JsonPropertyName("version")] int Version);
+
+public sealed record TemplateListDto(
+    [property: JsonPropertyName("templates")] List<ReportTemplateDto> Templates,
+    [property: JsonPropertyName("total")] int Total);
+
+// ---- Phase 6: report lifecycle -----------------------------------------------------
+
+public sealed record ReportWarningDto(
+    [property: JsonPropertyName("id")] string Id,
+    [property: JsonPropertyName("code")] string Code,
+    [property: JsonPropertyName("severity")] string Severity,
+    [property: JsonPropertyName("message")] string Message,
+    [property: JsonPropertyName("section_id")] string? SectionId,
+    [property: JsonPropertyName("evidence")] string? Evidence,
+    [property: JsonPropertyName("acknowledged")] bool Acknowledged,
+    [property: JsonPropertyName("acknowledgment_justification")] string? AcknowledgmentJustification);
+
+public sealed record ReportSectionDto(
+    [property: JsonPropertyName("id")] string Id,
+    [property: JsonPropertyName("title")] string Title,
+    [property: JsonPropertyName("markdown")] string Markdown,
+    [property: JsonPropertyName("missing")] bool Missing);
+
+public sealed record ReportDto(
+    [property: JsonPropertyName("report_id")] string ReportId,
+    [property: JsonPropertyName("encounter_id")] string EncounterId,
+    [property: JsonPropertyName("status")] string Status,
+    [property: JsonPropertyName("template_key")] string? TemplateKey,
+    [property: JsonPropertyName("template_name")] string? TemplateName,
+    [property: JsonPropertyName("language")] string Language,
+    [property: JsonPropertyName("provider")] string? Provider,
+    [property: JsonPropertyName("sections")] List<ReportSectionDto> Sections,
+    [property: JsonPropertyName("warnings")] List<ReportWarningDto> Warnings,
+    [property: JsonPropertyName("critical_warnings")] int CriticalWarnings,
+    [property: JsonPropertyName("blocking_warnings")] int BlockingWarnings,
+    [property: JsonPropertyName("amended_from")] string? AmendedFrom = null);
+
+public sealed record ReportDraftRequestDto(
+    [property: JsonPropertyName("transcript")] string? Transcript,
+    [property: JsonPropertyName("session_id")] string? SessionId,
+    [property: JsonPropertyName("template_key")] string? TemplateKey,
+    [property: JsonPropertyName("language")] string Language = "fa-en");
+
+public sealed record ReportDraftResponseDto(
+    [property: JsonPropertyName("report_id")] string ReportId,
+    [property: JsonPropertyName("status")] string Status,
+    [property: JsonPropertyName("provider")] string Provider,
+    [property: JsonPropertyName("warnings")] List<ReportWarningDto> Warnings,
+    [property: JsonPropertyName("terminology_substitutions")] int TerminologySubstitutions,
+    [property: JsonPropertyName("transcript_source")] string TranscriptSource);
+
+// ---- Phase 6: terminology normalization (POST /api/v1/terminology/normalize) ----
+
+public sealed record SubstitutionDto(
+    [property: JsonPropertyName("original")] string Original,
+    [property: JsonPropertyName("replacement")] string Replacement,
+    [property: JsonPropertyName("category")] string Category);
+
+public sealed record NormalizationResultDto(
+    [property: JsonPropertyName("normalized")] string Normalized,
+    [property: JsonPropertyName("substitutions")] List<SubstitutionDto> Substitutions,
+    [property: JsonPropertyName("reversible")] bool Reversible);

@@ -24,13 +24,22 @@ using MedicalScribe.WPF.Settings;
 
 namespace MedicalScribe.WPF.Services;
 
-/// <summary>What the live transcript view must expose for dictation.</summary>
+/// <summary>What the live transcript view must expose for dictation.
+/// Phase 6 adds voice-command effects (markers, delete-last-sentence,
+/// session identity) — the server remains the source of truth; these keep
+/// the local view in sync until the next GET /transcripts/{id} refresh.</summary>
 public interface ILiveTranscriptSink
 {
     void SetInterim(string? text);
     void AppendFinal(TranscriptSegmentEntry segment);
     void AddWarning(TranscriptWarning warning);
     void SetStatusNote(string note);
+    /// <summary>Structural marker from a voice command (paragraph/section).</summary>
+    void InsertMarker(TranscriptSegmentEntry marker);
+    /// <summary>Mirror of the server delete-last-sentence effect.</summary>
+    void RemoveLastSentence();
+    /// <summary>Current dictation session id (for report drafting).</summary>
+    void SetSessionId(string? sessionId);
 }
 
 public sealed class DictationSession : IDisposable
@@ -163,12 +172,52 @@ public sealed class DictationSession : IDisposable
         _ui.Post(() => ProjectEvent(evt, _sink));
     }
 
+    /// <summary>Apply a recognized voice command to the local view. The
+    /// server already applied the authoritative effect to its transcript
+    /// store; this mirrors it so the UI does not diverge mid-session.</summary>
+    public static void ProjectCommand(WsCommandEvent command, ILiveTranscriptSink sink)
+    {
+        switch (command.Command)
+        {
+            case "new_paragraph":
+                sink.InsertMarker(new TranscriptSegmentEntry(
+                    $"cmd-{command.SegmentId ?? "para"}", "— پاراگراف جدید —", 0, 0, null,
+                    SegmentOrigin.Command));
+                break;
+            case "insert_section" when command.Args.TryGetValue("section_title", out var title):
+                sink.InsertMarker(new TranscriptSegmentEntry(
+                    $"cmd-{command.SegmentId ?? "sect"}", $"## {title}", 0, 0, null,
+                    SegmentOrigin.Command));
+                break;
+            case "delete_last_sentence":
+                sink.RemoveLastSentence();
+                break;
+            case "repeat_last":
+                // the server re-appended the last dictated text; the next
+                // final frame will carry it — surface the feedback only
+                sink.SetStatusNote("voice command: repeat_last");
+                break;
+            case "pause_recording":
+                sink.SetStatusNote("capture paused by voice — say 'ادامه ضبط' to resume");
+                break;
+            case "resume_recording":
+                sink.SetStatusNote("capture resumed");
+                break;
+            default:
+                sink.SetStatusNote($"voice command: {command.Command}");
+                break;
+        }
+    }
+
     /// <summary>Pure mapping from protocol event to sink calls — public for
     /// deterministic unit tests without sockets or WPF.</summary>
     public static void ProjectEvent(WsEvent evt, ILiveTranscriptSink sink)
     {
         switch (evt)
         {
+            case WsStartedEvent started:
+                sink.SetSessionId(string.IsNullOrEmpty(started.SessionId) ? null : started.SessionId);
+                break;
             case WsInterimEvent interim:
                 sink.SetInterim(interim.Text);
                 break;
@@ -180,7 +229,7 @@ public sealed class DictationSession : IDisposable
                 sink.AddWarning(new TranscriptWarning(warning.Code, warning.Message, warning.SegmentId));
                 break;
             case WsCommandEvent command:
-                sink.SetStatusNote($"voice command: {command.Command}");
+                ProjectCommand(command, sink);
                 break;
             case WsErrorEvent error:
                 sink.SetStatusNote($"server error [{error.Code}]: {error.Message}");

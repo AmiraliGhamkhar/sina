@@ -102,6 +102,67 @@ public class DictationProjectionTests
     }
 
     [Fact]
+    public void StartedFrameSetsSessionId()
+    {
+        var vm = new LiveTranscriptViewModel();
+        DictationSession.ProjectEvent(
+            new WsStartedEvent("mock", "auto", "fa-en") { SessionId = "ws_9" }, vm);
+        Assert.Equal("ws_9", vm.SessionId);
+    }
+
+    [Fact]
+    public void NewParagraphCommandInsertsMarkerEntry()
+    {
+        var vm = new LiveTranscriptViewModel();
+        DictationSession.ProjectEvent(new WsFinalEvent("جمله اول.", "s1", 0, 10, null, null), vm);
+        DictationSession.ProjectEvent(
+            new WsCommandEvent("new_paragraph", new Dictionary<string, string>(), "پاراگراف جدید", null),
+            vm);
+        Assert.Equal(2, vm.Segments.Count);
+        Assert.Equal(SegmentOrigin.Command, vm.Segments[1].Origin);
+    }
+
+    [Fact]
+    public void InsertSectionCommandInsertsHeadingMarker()
+    {
+        var vm = new LiveTranscriptViewModel();
+        DictationSession.ProjectEvent(
+            new WsCommandEvent("insert_section",
+                new Dictionary<string, string> { ["section_title"] = "طرح درمان" },
+                "درج بخش طرح درمان", "seg_2"),
+            vm);
+        var marker = Assert.Single(vm.Segments);
+        Assert.Equal(SegmentOrigin.Command, marker.Origin);
+        Assert.Contains("طرح درمان", marker.Text);
+    }
+
+    [Fact]
+    public void DeleteLastSentenceCommandMirrorsServerEffect()
+    {
+        var vm = new LiveTranscriptViewModel();
+        DictationSession.ProjectEvent(
+            new WsFinalEvent("جمله یک. جمله دو.", "s1", 0, 10, null, null), vm);
+        DictationSession.ProjectEvent(
+            new WsCommandEvent("delete_last_sentence", new Dictionary<string, string>(),
+                "حذف جمله آخر", null),
+            vm);
+        var seg = Assert.Single(vm.Segments);
+        Assert.Equal("جمله یک.", seg.Text);
+    }
+
+    [Fact]
+    public void PauseCommandSetsStatusNotSegments()
+    {
+        var vm = new LiveTranscriptViewModel();
+        DictationSession.ProjectEvent(
+            new WsCommandEvent("pause_recording", new Dictionary<string, string>(),
+                "توقف ضبط", null),
+            vm);
+        Assert.Contains("paused", vm.StatusNote);
+        Assert.Empty(vm.Segments);
+    }
+
+    [Fact]
     public void EditedSegmentIsFlaggedForAudit()
     {
         var vm = new LiveTranscriptViewModel();

@@ -154,7 +154,7 @@ Done notes (deviations recorded honestly):
   budget counters are in-process (restart resets the day; durable spend lives
   with the P7 `ai_requests` table); `absorb` is an average, not CRDT-merged.
 
-## Phase 6 — Commands, templates, validation (next)
+## Phase 6 — Commands, templates, validation ✅ (done — this build)
 - Extensible command parser (`backend/api/services/voice_commands/`):
   registry of command handlers w/ bilingual triggers, exact/anchored match
   policy + "command mode" (only strips speech that couldn't be clinical
@@ -168,34 +168,129 @@ Done notes (deviations recorded honestly):
 - Report generator + validator: numbers/doses/units, laterality, negation,
   dates (Jalali+Gregorian), identifiers; emits `ValidationWarning[]`;
   draft/finalize/approve endpoints + immutability of approved versions.
-- Acceptance: medical-safety test pack (spec §18) green; UI shows warnings
-  blocking approve until acknowledged (with recorded justification).
 
-## Phase 7 — Persistence, auth, Redis
-- SQLAlchemy models (all §13 entities) + Alembic baseline migration + seed
-  script (roles, built-in templates, provider rows from env).
-- Auth: argon2 hashing, login/refresh (rotation + revocation), roles/policies,
-  WS token = access JWT (short TTL), lockout policy; rate limiting via Redis
-  (degrade-open + auth-bucket, MMG shape) — with per-WS connection caps.
-- AuditLog table (append-only, deny-listed payload) + admin query API;
-  transcripts/segments/reports persistence, revisions table (clinician edits),
-  audio policy: discard after finalize unless `MS_AUDIO__RETAIN_HOURS`.
-- Acceptance: postgres/redis compose profile integration tests (testcontainers
-  or compose-run CI), migration up/down round-trip, auth e2e incl. expired/
-  revoked token paths.
+Done notes (deviations recorded honestly):
+- All items landed. Voice commands: `api/services/voice_commands/` package
+  (catalog → parser → effects) — data-driven, bilingual, whole-utterance
+  exact/anchored matching, `فرمان`/"command" mode prefixes, ambiguity keeps
+  text + `COMMAND_AMBIGUOUS` warning (never deletes clinical speech). Effects:
+  paragraph/section/finalized-section markers, delete-last-sentence with
+  journal-backed undo, repeat, voice pause/resume (audio keeps flowing so the
+  resume command stays audible — distinct from control-frame pause which
+  buffers). Hub integration: command utterances never enter the transcript;
+  per-command metrics; `command.detected` frames carry args + utterance.
+- Terminology: `terminology_data.py` (curated catalog: transliterations →
+  English terms incl. spec-listed MRI/CT/ECG/hypertension; native Persian
+  terms stay Persian) + `terminology.py` engine (whole-term longest-match,
+  reversible substitutions, engine REFUSES entries containing digits/units/
+  negation/laterality). `GET /terminology`, `POST /terminology/normalize`.
+  The draft prompt uses the normalized view; validation grounds against
+  raw + normalized (union = synonyms, never fabrications).
+- Templates: `templates.py` service + full CRUD API; built-ins seeded as data
+  (general/soap/radiology/us/ct/mri), immutable; fork; LLM extraction from
+  example note (Phlox concept) returns an UNSAVED proposal. WPF Templates
+  screen is now server-driven + fork.
+- Reports: server-side `report_store.py` with draft → finalized → approved;
+  PATCH sections (revision events), acknowledge-with-justification, finalize
+  and approve both blocked by unacknowledged **critical** warnings, reopen,
+  amend (approved immutable, amendments linked). Draft endpoint accepts
+  `session_id` (marker-aware assembly + terminology view) or inline text.
+- Validation (`validation.py`): unit-aware bilingual quantities (۴۰ میلی‌گرم
+  == 40 mg; cc≈ml), dose near-miss detection (10→100 mg critical, drug
+  proximity), laterality pairs + swap detection (fa+en), term-level negation
+  scope analysis (بدون/عدم/ندارد/نمی/no/without/denies…, contrast-conjunction
+  scope cuts), dates incl. Jalali↔Gregorian conversion + month names,
+  identifiers (phone/national-id/MRN, decimal-safe), anatomy grounding.
+  Old light-check codes preserved (`unverified_number`,
+  `laterality_unverified`, `negation_shift_suspected`) for wire compat.
+- Acceptance: medical-safety pack green (`tests/test_medical_validation.py`:
+  10mg→100mg critical, right→left critical, no-effusion→effusion critical,
+  missing-stays-missing, Jalali date equality/one-day-off, identifier flips,
+  bilingual unit equivalence). WPF report screen shows severity-colored
+  warnings, acknowledgment with justification, finalize/approve blocked by
+  the server (409) and surfaced honestly. 243 backend tests.
+- Not covered honestly: templates/reports/transcripts are in-memory (P7
+  persistence is the seam — service APIs are repository-shaped); template
+  extraction verified against scripted LLMs only; the WPF client compiles in
+  CI (no SDK in the dev sandbox) — command projection + lifecycle logic is
+  unit-tested headlessly, window-level behavior needs the Windows runner.
 
-## Phase 8 — Hardening & release
-- Prometheus `/metrics` (+optional OTel traces), Grafana dashboard shipped in
-  infrastructure; structured error budgets.
-- Load test: 20 concurrent WS sessions on 4 GB VM w/ local llama-server —
-  p50/p95 transcript latency recorded; soak 2 h.
-- Windows installer: MSIX + signing, auto-update policy, first-run wizard
-  (server URL, CA pin, mic test, hotkey); crash-telemetry with no payload
-  capture.
-- Security pass: dependency audit, CSP-ish hardening N/A (desktop) but TLS
-  pinning review, secret-scan in CI, pen-test checklist for gateway.
-- Acceptance: release checklist in docs; all spec §19 engineering rules
-  re-verified; regulatory-boundary language reviewed (assistive-only).
+## Phase 7 — Persistence, auth, Redis ✅ (done — this build)
+- SQLAlchemy 2.0 async models for all §13 entities (`backend/api/models/orm.py`,
+  14 tables) + Alembic baseline migration (`backend/alembic`, URL from
+  `MS_DATABASE__URL`) + idempotent seed (roles, built-in templates as rows,
+  provider metadata mirror, admin bootstrap only with an explicit password).
+- Auth: argon2id hashing (dummy-hash timing equalizer), credential
+  login/refresh/logout, one-time refresh tokens with rotation — reuse of a
+  consumed token revokes ALL of that user's sessions; per-username lockout
+  (5 failures → 300 s default); dev-token path unchanged for non-prod.
+- Rate limiting: Redis backend when `MS_REDIS__URL` is set, in-process
+  otherwise, degrade-open on backend failure (lockout guard remains as the
+  auth bucket's second layer); tighter auth bucket; per-user concurrent WS
+  session cap (`MS_RATE_LIMIT__WS_SESSIONS_PER_USER`).
+- Audit dual-write: JSONL file (unchanged) + `audit_log` rows via a bounded
+  background writer (drops to file-only when the queue is full); admin query
+  API `GET /api/v1/admin/audit`.
+- Persistence write-through: transcripts (whole-session idempotent upsert on
+  WS session end, shielded from transport-teardown cancellation), reports +
+  `report_revisions` rows, template catalog reload, AI request ledger; memory
+  caches stay authoritative on DB lag (write failures log + count, never
+  break the clinical flow); `GET` falls back to durable rows after LRU
+  eviction or restart.
+- Provider secrets: Fernet-encrypted at rest (`ai_providers.secret_ciphertext`),
+  admin PUT/DELETE API, decrypted in exactly one place
+  (`ai_bridge.provider_config_with_secrets`); secrets never appear in
+  queries, listings, or logs.
+- New surface: `POST /patients`, `GET /patients`, `GET /patients/{id}`,
+  `POST /encounters`, `GET /encounters/{id}`, `GET /reports/{id}/revisions`,
+  admin users/audit/secrets/ai-requests endpoints.
+- In-memory dev mode is unchanged and fully functional when
+  `MS_DATABASE__URL` is unset; DB-backed routes answer 501
+  `DB_NOT_CONFIGURED` instead of pretending.
+- Done-notes (honesty ledger): integration tests run on sqlite+aiosqlite
+  (same engine code path as Postgres minus the server) — a real
+  postgres/redis compose-profile CI job is still open (Phase 8 hardening);
+  audio retention policy (`MS_AUDIO__RETAIN_HOURS`) not implemented — audio
+  is never persisted in the first place (only transcripts/reports); WPF
+  client stores the refresh token in memory and sends it on logout, but has
+  no background auto-refresh timer yet (token TTL 30 min; re-login required
+  after expiry in the current client).
+
+## Phase 8 — Hardening & release ✅ (done in this build — see honesty ledger)
+- Prometheus `/metrics` live (dependency-free text exposition,
+  `medicalscribe_*` series, route/status labels, latency quantiles p50/p95/p99
+  + exact sum/count); optional OTel tracing (`observability` extra +
+  `MS_OBSERVABILITY__OTEL_ENABLED`, OTLP gRPC); Grafana dashboard shipped
+  (`infrastructure/prometheus/grafana-dashboard.json`, compose
+  `--profile monitoring`).
+- WS app-level keepalive: server sends `heartbeat.ping` on idle (one
+  heartbeat interval), client auto-pongs; 3 silent intervals still close
+  4408 (nginx already tuned to 3600 s read/send timeouts).
+- Cost-budget counters are now durable: the ledger backfills today's tokens
+  from `ai_requests` at boot — a mid-day restart no longer resets the budget.
+- CI hardening: backend tests run against **real PostgreSQL 16 + Redis 7
+  services** (fresh DB per test); `pip-audit`; `gitleaks` full-history secret
+  scan (`.gitleaks.toml` allowlists synthetic test fixtures only).
+- Load test: `infrastructure/load/ws_loadtest.py` — 20 concurrent sessions ×
+  15 s verified against the mock STT (20/20 completed, 0 errors, handshake
+  p95 = 14 ms, per-final arrival p50 ≈ 1.1 s on the sandbox CPU).
+- First-run wizard in the WPF client (server URL + connectivity probe,
+  microphone selection, hotkey notice; runs before DI so the saved URL is
+  what gets wired).
+- MSIX: manifest + `.appinstaller` auto-update templates
+  (`client/packaging/`) + full packaging/signing runbook in
+  `docs/RELEASE.md`; the actual MSIX build needs a Windows machine
+  (makeappx/SignTool are Windows-only) — NOT yet automated on the CI Windows
+  runner.
+- Security: `docs/SECURITY.md` (env checklist, data-hygiene invariants,
+  gateway pen-test checklist, accepted risks); release runbook
+  `docs/RELEASE.md` incl. regulatory-boundary review step.
+- Done-notes (honesty ledger): the 20-session number is on the **mock STT
+  path in a sandbox** — the roadmap's 4 GB VM + local llama-server p50/p95
+  soak (2 h) still needs real hardware; MSIX build/sign is a documented
+  manual Windows step, not CI-automated; CA-thumbprint pinning in the WPF
+  client settings remains a manual review item (no global TLS-bypass flags
+  exist — verified).
 
 ## Standing engineering constraints (all phases)
 

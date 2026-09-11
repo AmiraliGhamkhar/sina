@@ -7,12 +7,14 @@ from api.auth.tokens import TokenError, create_token, decode_token
 from api.errors import ErrorCode
 
 
-def test_login_returns_501_with_stable_code_when_not_dev(client):
+def test_login_without_db_is_501_with_stable_code(client):
+    """Credential auth is implemented (Phase 7) but needs a database; the
+    in-memory dev mode reports the capability boundary honestly."""
     resp = client.post("/api/v1/auth/login", json={"username": "doc", "password": "pw"})
     assert resp.status_code == 501
     body = resp.json()
     assert body["error"]["code"] == ErrorCode.AUTH_NOT_IMPLEMENTED
-    assert "Phase 7" in body["error"]["message"]
+    assert "database" in body["error"]["message"].lower()
 
 
 def test_login_rejects_malformed_body(client):
@@ -40,9 +42,43 @@ def test_dev_token_login_returns_usable_jwt_pair(client):
     assert body["is_dev"] is False
 
 
-def test_refresh_is_501(client, auth_headers):
+def test_refresh_with_garbage_token_is_401(client):
+    """Phase 7: rotation is live even in dev mode (memory refresh store);
+    an unknown token is simply unauthenticated, not a capability gap."""
     resp = client.post("/api/v1/auth/refresh", json={"refresh_token": "x"})
-    assert resp.status_code == 501
+    assert resp.status_code == 401
+    assert resp.json()["error"]["code"] == ErrorCode.UNAUTHENTICATED
+
+
+def test_dev_login_refresh_rotation_in_memory(client):
+    """Dev-mode pair rotates: old refresh token is single-use."""
+    login = client.post(
+        "/api/v1/auth/login", json={"username": "dev", "password": "dev-token-1234567890"}
+    )
+    assert login.status_code == 200, login.text
+    first = login.json()
+    rotated = client.post("/api/v1/auth/refresh", json={"refresh_token": first["refresh_token"]})
+    assert rotated.status_code == 200, rotated.text
+    second = rotated.json()
+    assert second["refresh_token"] != first["refresh_token"]
+    # reuse of the consumed token is rejected
+    reuse = client.post("/api/v1/auth/refresh", json={"refresh_token": first["refresh_token"]})
+    assert reuse.status_code == 401
+
+
+def test_logout_revokes_presented_refresh_token(client):
+    login = client.post(
+        "/api/v1/auth/login", json={"username": "dev", "password": "dev-token-1234567890"}
+    )
+    pair = login.json()
+    out = client.post(
+        "/api/v1/auth/logout",
+        headers={"Authorization": f"Bearer {pair['access_token']}"},
+        json={"refresh_token": pair["refresh_token"]},
+    )
+    assert out.status_code == 200
+    reuse = client.post("/api/v1/auth/refresh", json={"refresh_token": pair["refresh_token"]})
+    assert reuse.status_code == 401
 
 
 def test_me_requires_auth(client):
@@ -86,3 +122,19 @@ def test_resolve_principal_guards(settings):
         Headers({"authorization": "Bearer dev-token-1234567890"}), QueryParams(), settings
     )
     assert p is not None and p.is_dev
+
+
+def test_production_fail_closed_on_weak_jwt_secret():
+    """Security invariant: production Settings refuse to construct without a
+    >=32-char JWT secret — on the MODEL, so no construction path can bypass
+    it (the loader check is redundant belt-and-braces)."""
+    import pydantic
+    import pytest
+    from api.config import Settings
+
+    for bad in (None, "too-short"):
+        with pytest.raises(pydantic.ValidationError):
+            Settings(server={"env": "production"}, auth={"jwt_secret": bad})
+    # strong secret + dev env are unaffected
+    Settings(server={"env": "production"}, auth={"jwt_secret": "x" * 48})
+    Settings(server={"env": "dev"})
