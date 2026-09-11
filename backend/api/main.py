@@ -22,6 +22,7 @@ from __future__ import annotations
 import logging
 import time
 from contextlib import asynccontextmanager
+from datetime import UTC
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -46,7 +47,7 @@ from api.services.templates import TemplateService
 from api.services.terminology import TerminologyNormalizer
 from api.services.transcript_store import TranscriptStore
 from api.services.voice_commands import VoiceCommandService
-from api.telemetry import Metrics, setup_logging
+from api.telemetry import Metrics, maybe_init_otel, setup_logging
 from api.version import API_VERSION, APP_NAME, PHASE, WS_PROTOCOL_VERSION
 
 logger = logging.getLogger(__name__)
@@ -76,11 +77,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             try:
                 if settings.database.auto_create:
                     await db.create_all()  # dev convenience; prod = alembic
+                from datetime import datetime
+
                 from api.services.seed import seed_all
 
                 await seed_all(app)
                 await app.state.template_service.load_from_db()
                 app.state.audit.attach_db(app.state.audit_repo)
+                # Phase 8: durable cost-budget backfill — a mid-day restart
+                # no longer resets the day's token spend
+                if app.state.ai_requests is not None:
+                    day_start = datetime.now(UTC).replace(
+                        hour=0, minute=0, second=0, microsecond=0
+                    )
+                    try:
+                        totals = await app.state.ai_requests.token_totals_since(day_start)
+                        if totals:
+                            app.state.cost_ledger.backfill(totals)
+                    except Exception:  # noqa: BLE001 — cost guard fails open
+                        logger.warning("cost ledger backfill failed", exc_info=True)
                 logger.info(
                     "durable mode: database ready url=%s", db.url.split("@")[-1]
                 )
@@ -120,6 +135,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         docs_url=None if settings.is_production else "/docs",
         openapi_url=None if settings.is_production else "/openapi.json",
     )
+    # Phase 8: optional OTel tracing (no-op unless enabled + extra installed)
+    maybe_init_otel(settings, app)
 
     # -- state -----------------------------------------------------------
     app.state.settings = settings
@@ -224,8 +241,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.middleware("http")
     async def _timing_and_count(request: Request, call_next):
         # Phase 7 rate limiting (auth paths get a tighter bucket). Health
-        # probes are exempt. Redis hiccups degrade open — see RateLimiter.
-        if request.url.path not in ("/health", "/health/ready"):
+        # probes + the Prometheus scrape path are exempt. Redis hiccups
+        # degrade open — see RateLimiter.
+        if request.url.path not in ("/health", "/health/ready", "/metrics"):
             try:
                 await app.state.rate_limiter.check_request(
                     path=request.url.path,

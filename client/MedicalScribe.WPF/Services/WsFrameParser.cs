@@ -56,6 +56,8 @@ public sealed record WsAckEvent(string AckFor, string? State) : WsEvent("ack");
 public sealed record WsCompletedEvent(int SegmentCount, long DurationMs, string? Provider)
     : WsEvent("session.completed");
 
+public sealed record WsHeartbeatEvent(long ServerTimeMs) : WsEvent("heartbeat.ping");
+
 public sealed record WsUnknownEvent(string UnknownType) : WsEvent("unknown");
 
 public static class WsFrameParser
@@ -109,6 +111,8 @@ public static class WsFrameParser
                     Bool(root, "recoverable"), Str(root, "field"))
                 { SessionId = sessionId },
                 "ack" => new WsAckEvent(Str(root, "ack_for") ?? "", Str(root, "state"))
+                { SessionId = sessionId },
+                "heartbeat.ping" => new WsHeartbeatEvent(Long(root, "server_time_ms"))
                 { SessionId = sessionId },
                 "session.completed" => new WsCompletedEvent(
                     Int(root, "segment_count"), Long(root, "duration_ms"), Str(root, "provider"))

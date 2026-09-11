@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  MedicalScribe MSIX auto-update policy TEMPLATE (Phase 8).
+
+  Served over HTTPS from the clinic update host (e.g.
+  https://updates.clinic.example/msix/MedicalScribe.appinstaller). Windows
+  polls on the schedule below and updates silently, honoring the signature:
+  an MSIX whose publisher differs from the installed one is refused.
+
+  Fill every {{PLACEHOLDER}}; see docs/RELEASE.md §Auto-update.
+-->
+<AppInstaller
+  xmlns="http://schemas.appinstaller.com/schema/2018"
+  Version="{{VERSION}}"
+  Uri="{{INSTALLER_URI}}">
+
+  <MainBundle
+    Name="{{PACKAGE_IDENTITY_NAME}}"
+    Publisher="{{PUBLISHER_CN}}"
+    Version="{{VERSION}}"
+    Uri="{{MSIX_URI}}"/>
+
+  <UpdateSettings>
+    <!-- check hourly on the clinic LAN; force after 7 days of deferral -->
+    <OnLaunch HoursBetweenUpdateChecks="1"
+              ShowPrompt="false"
+              UpdateBlocksActivation="false"/>
+    <AutomaticBackgroundTask/>
+    <ForceUpdateFromAnyVersion>false</ForceUpdateFromAnyVersion>
+  </UpdateSettings>
+</AppInstaller>

@@ -65,6 +65,13 @@ class SecurityConfig(BaseModel):
     secret_encryption_key: SecretStr | None = None
 
 
+class ObservabilityConfig(BaseModel):
+    """Phase 8 — /metrics is always on; OTel tracing is opt-in (needs the
+    `observability` extra) and follows the standard OTLP env contract."""
+
+    otel_enabled: bool = False
+
+
 class RedisConfig(BaseModel):
     url: str | None = None  # redis://host:6379/0
 
@@ -243,6 +250,7 @@ class Settings(BaseSettings):
     websocket: WebsocketConfig = Field(default_factory=WebsocketConfig)
     audit: AuditConfig = Field(default_factory=AuditConfig)
     security: SecurityConfig = Field(default_factory=SecurityConfig)
+    observability: ObservabilityConfig = Field(default_factory=ObservabilityConfig)
 
     @property
     def is_production(self) -> bool:

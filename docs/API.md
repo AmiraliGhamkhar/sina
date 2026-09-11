@@ -19,6 +19,7 @@ data must not echo back through error paths).
 | Method | Path | Notes |
 |---|---|---|
 | GET | `/health` | liveness: `{status, version, phase}` |
+| GET | `/metrics` | **Phase 8** Prometheus text exposition (no auth — internal scrape only; the nginx edge does not proxy this path). Series: `medicalscribe_http_responses_total{status}`, `medicalscribe_http_request_duration_seconds{route,quantile}` (p50/p95/p99 + exact sum/count), `medicalscribe_{ws,llm,stt}_…` counters, `medicalscribe_provider_healthy{provider}`, cost-budget gauges, `db_mode`, `build_info`. Never contains transcripts, usernames, or secrets. |
 | GET | `/health/ready` | readiness: real engine ping for Postgres once Phase 7 owns the engine (TCP probe fallback), TCP for Redis; unconfigured ⇒ `disabled`, not blocking |
 | GET | `/api/v1/version` | `{name, api_version, ws_protocol, ws_protocol_min, phase}` |
 | GET | `/api/v1/config/manifest` | **client policy manifest**: ws path/protocol, audio format, languages (fa/en/fa-en), feature flags, voice-command catalog, routing modes |

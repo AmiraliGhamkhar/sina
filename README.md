@@ -76,7 +76,7 @@ honestly.
 | 5 | Router hardening: health fed by task outcomes, latency EWMA ranking, runtime fallback chains (WS + batch + draft), daily token budget soft-stop, optional Redis health mirror | ✅ done |
 | 6 | Voice commands (parser+effects+undo), bilingual terminology, data-driven templates + LLM extraction, report lifecycle (draft→finalized→approved with acknowledged warnings), full clinical validation (doses/units/laterality/negation/dates/identifiers/anatomy) | ✅ done (this build) |
 | 7 | PostgreSQL + SQLAlchemy + Alembic (14 tables, write-through + restart reload), JWT + one-time refresh rotation (reuse ⇒ revoke all), argon2 login w/ lockout, Redis-or-in-process rate limiting (degrade-open) + per-user WS cap, Fernet-encrypted provider secrets, audit dual-write + admin API, patients/encounters | ✅ done (this build) |
-| 8 | Prometheus/OTel, load tests, MSIX packaging, production hardening | planned |
+| 8 | Prometheus `/metrics` (dependency-free) + optional OTel, Grafana dashboard, WS heartbeat keepalive, durable cost-budget backfill, CI on real Postgres/Redis + pip-audit + gitleaks, WS load-test harness (20 sessions verified), first-run wizard, MSIX templates + release/security runbooks | ✅ done (mock-path load numbers; MSIX signing is a documented Windows step — see honesty ledger) |
 
 ## Non-negotiables encoded in this codebase
 
@@ -143,7 +143,15 @@ honestly.
    Validation is heuristic NLP (cue scopes, proximity windows) — deliberately
    advisory-with-critical-flags, never an editor; false negatives are possible
    and the two-step sign-off is the safety net.
-6. Cost-budget counters are in-process (a restart resets the day); durable
-   usage rows land with the Phase 7 database.
-7. Observability is process-local counters; Prometheus/OTel endpoints land in
-   Phase 8.
+6. Cost-budget counters are durable since Phase 8 (boot-time backfill from
+   `ai_requests`; fail-open only while the DB is unreachable at boot).
+7. Prometheus `/metrics` is live (Phase 8); OTel tracing requires the
+   optional `observability` extra and is off by default.
+8. The 20-session load number was measured against the **mock STT provider
+   in a sandbox** (harness: `infrastructure/load/ws_loadtest.py`); the
+   production-shape soak (4 GB VM + local llama-server, 2 h) still needs
+   real hardware. MSIX packaging/signing is templated + documented
+   (`client/packaging/`, `docs/RELEASE.md`) but not CI-automated — it needs
+   one iteration on a Windows machine with the real certificate.
+9. First-run wizard covers server URL + mic + hotkey notice; CA-thumbprint
+   pinning review and the full mic-level test are manual Windows passes.

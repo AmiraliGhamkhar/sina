@@ -76,6 +76,18 @@ services:
       - "127.0.0.1:9090:9090"
     restart: unless-stopped
 
+  grafana:
+    image: grafana/grafana:11.1.0
+    profiles: ["monitoring"]
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}  # override in .env
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    volumes:
+      - ./infrastructure/prometheus/grafana-dashboard.json:/var/lib/grafana/dashboards/medicalscribe-api.json:ro
+    ports:
+      - "127.0.0.1:3000:3000"
+    restart: unless-stopped
+
   # llama-server is an EXTERNAL service (spec §12): MedicalScribe never embeds
   # llama.cpp; it talks to this HTTP endpoint over MS_LLM__LLAMA_SERVER__BASE_URL.
   llama:

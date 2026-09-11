@@ -127,6 +127,12 @@ Notes:
   `false` ⇒ expect close shortly.
 - Heartbeats: the server enforces liveness by idle timeout
   (`MS_WEBSOCKET__HEARTBEAT_SECONDS × 3` without any frame → close 4408) and
+- server→client `heartbeat.ping` frames (Phase 8): when a session is open but
+  silent for one heartbeat interval the server sends
+  `{"v":1,"type":"heartbeat.ping","session_id":…,"server_time_ms":…}`; the
+  client SHOULD reply `{"v":1,"type":"pong"}` (any inbound frame — audio,
+  control, pong — resets the idle counter). Three consecutive silent
+  intervals still close with 4408;
   accepts-but-ignores `{"v":1,"type":"pong"}` from clients. Explicit
   app-level `heartbeat` frames are deferred to Phase 8 with nginx
   `proxy_read_timeout` tuning; when added they will be new allowed types

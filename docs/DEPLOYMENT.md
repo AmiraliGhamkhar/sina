@@ -36,6 +36,16 @@
 
 - Health gates containers: `/health` liveness; `/health/ready` pings the
   database engine directly (Phase 7) and TCP-probes Redis when configured.
+- Monitoring (Phase 8): `docker compose --profile monitoring up` adds
+  Prometheus (scrapes `api:8000/metrics`, 15 s) and Grafana with the
+  `medicalscribe-api` dashboard (`infrastructure/prometheus/
+  grafana-dashboard.json`). The edge does NOT proxy `/metrics` — scrape
+  internally only. Optional OTel traces: install the `observability` extra,
+  set `MS_OBSERVABILITY__OTEL_ENABLED=true` + `OTEL_EXPORTER_OTLP_ENDPOINT`.
+- Load testing (Phase 8): `infrastructure/load/ws_loadtest.py --url
+  ws://host:8000/ws/v1/transcribe --jwt-secret <secret> --sessions 20` —
+  mints one principal per session so the per-user cap (5) isn't the thing
+  being measured.
 - Schema management (Phase 7): production boots with
   `MS_DATABASE__AUTO_CREATE=false` and applies `cd backend &&
   MS_DATABASE__URL=... alembic upgrade head` as a release step; `create_all`

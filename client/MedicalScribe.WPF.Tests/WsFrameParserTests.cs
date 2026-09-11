@@ -124,6 +124,17 @@ public class WsFrameParserTests
         Assert.Equal("transcript.correction", unknown.UnknownType);
     }
 
+    [Fact]
+    public void HeartbeatPingParses()
+    {
+        // Phase 8 keepalive: server pings when idle; the client auto-pongs
+        var evt = WsFrameParser.Parse(
+            """{"v":1,"type":"heartbeat.ping","session_id":"ws_abc","server_time_ms":1694432000123}""");
+        var ping = Assert.IsType<WsHeartbeatEvent>(evt);
+        Assert.Equal(1694432000123, ping.ServerTimeMs);
+        Assert.Equal("ws_abc", ping.SessionId);
+    }
+
     [Theory]
     [InlineData("")]
     [InlineData("{not json")]

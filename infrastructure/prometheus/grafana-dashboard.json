@@ -1,0 +1,178 @@
+{
+  "__inputs": [
+    {
+      "name": "DS_PROMETHEUS",
+      "label": "Prometheus",
+      "type": "datasource",
+      "pluginId": "prometheus",
+      "pluginName": "Prometheus"
+    }
+  ],
+  "title": "MedicalScribe API",
+  "uid": "medicalscribe-api",
+  "tags": ["medicalscribe", "phase8"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "refresh": "30s",
+  "time": { "from": "now-3h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Active dictation sessions",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        { "expr": "medicalscribe_ws_connections_active", "legendFormat": "active WS sessions" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short", "min": 0 } }
+    },
+    {
+      "id": 2,
+      "title": "Sessions started / stopped",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        { "expr": "rate(medicalscribe_ws_sessions_started_total[5m]) * 60", "legendFormat": "started /min" },
+        { "expr": "rate(medicalscribe_stt_streams_stopped_total[5m]) * 60", "legendFormat": "stopped /min" }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "HTTP traffic by status",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        { "expr": "sum by (status) (rate(medicalscribe_http_responses_total[5m])) * 60", "legendFormat": "{{status}}" }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "REST latency p95 (slowest routes)",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 7 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        { "expr": "topk(5, medicalscribe_http_request_duration_seconds{quantile=\"0.95\"})", "legendFormat": "{{route}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } }
+    },
+    {
+      "id": 5,
+      "title": "LLM requests / errors / fallbacks",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 7 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        { "expr": "sum(rate(medicalscribe_llm_requests_total[5m])) * 60", "legendFormat": "requests /min" },
+        { "expr": "sum(rate(medicalscribe_llm_errors_total[5m])) * 60", "legendFormat": "errors /min" },
+        { "expr": "rate(medicalscribe_llm_fallbacks_total[5m]) * 60", "legendFormat": "fallbacks /min" }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "STT segments finalized /min",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 7 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        { "expr": "rate(medicalscribe_stt_segments_final_total[5m]) * 60", "legendFormat": "finals /min" },
+        { "expr": "rate(medicalscribe_ws_audio_frames_total[5m]) * 60", "legendFormat": "audio frames /min" }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Provider health",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 14 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        { "expr": "medicalscribe_provider_healthy", "legendFormat": "{{provider}}" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 8,
+      "title": "Provider latency EWMA",
+      "type": "timeseries",
+      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 14 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        { "expr": "medicalscribe_provider_latency_ewma_ms", "legendFormat": "{{provider}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ms" } }
+    },
+    {
+      "id": 9,
+      "title": "Cost budget (tokens today vs budget)",
+      "type": "gauge",
+      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 14 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        { "expr": "medicalscribe_cost_tokens_today", "legendFormat": "tokens today" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 100000 },
+              { "color": "red", "value": 200000 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 10,
+      "title": "Durability write failures /min (must be ~0)",
+      "type": "timeseries",
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 20 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        { "expr": "rate(medicalscribe_transcript_db_write_failures_total[5m]) * 60", "legendFormat": "transcript flush failures" },
+        { "expr": "rate(medicalscribe_http_rate_limited_total[5m]) * 60", "legendFormat": "rate-limited requests" }
+      ]
+    },
+    {
+      "id": 11,
+      "title": "Voice commands /min + heartbeat pings",
+      "type": "timeseries",
+      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 20 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        { "expr": "sum(rate(medicalscribe_voice_commands_total[5m])) * 60", "legendFormat": "commands /min" },
+        { "expr": "rate(medicalscribe_ws_heartbeat_pings_total[5m]) * 60", "legendFormat": "keepalive pings /min" }
+      ]
+    },
+    {
+      "id": 12,
+      "title": "Build / mode info",
+      "type": "table",
+      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 20 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        { "expr": "medicalscribe_build_info", "format": "table", "instant": true },
+        { "expr": "medicalscribe_db_mode", "format": "table", "instant": true },
+        { "expr": "medicalscribe_uptime_seconds", "format": "table", "instant": true }
+      ]
+    }
+  ]
+}

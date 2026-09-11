@@ -1,0 +1,35 @@
+<Window x:Class="MedicalScribe.WPF.Views.FirstRunWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="MedicalScribe — first-run setup"
+        Height="560" Width="520"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="NoResize"
+        Background="{StaticResource AppBackground}">
+    <Grid>
+        <Border Style="{StaticResource Card}" Width="440" VerticalAlignment="Center" HorizontalAlignment="Center">
+            <StackPanel>
+                <TextBlock Text="Welcome" Style="{StaticResource SectionTitle}"/>
+                <TextBlock Foreground="{StaticResource MutedInk}" Margin="0,0,0,16" TextWrapping="Wrap"
+                           Text="Three quick steps before the first dictation. Everything is adjustable later in Settings."/>
+
+                <TextBlock Text="1 · MedicalScribe server" Style="{StaticResource FieldLabel}"/>
+                <TextBox x:Name="ServerUrlInput" Margin="0,4,0,4"/>
+                <Button Content="Test connection" HorizontalAlignment="Left" Padding="12,4" Click="OnTestConnection"/>
+                <TextBlock x:Name="ProbeResultText" Margin="0,6,0,12" TextWrapping="Wrap"/>
+
+                <TextBlock Text="2 · Microphone" Style="{StaticResource FieldLabel}"/>
+                <ComboBox x:Name="MicCombo" Margin="0,4,0,12" DisplayMemberPath="Name"/>
+
+                <TextBlock Text="3 · Dictation hotkey" Style="{StaticResource FieldLabel}"/>
+                <TextBlock x:Name="HotkeyText" Margin="0,4,0,16"
+                           Foreground="{StaticResource MutedInk}"/>
+
+                <Button Content="Save and continue" Margin="0,8,0,0" HorizontalAlignment="Stretch"
+                        Click="OnSave"/>
+                <Button Content="Skip — use defaults" Margin="0,8,0,0" HorizontalAlignment="Stretch"
+                        Click="OnSkip"/>
+            </StackPanel>
+        </Border>
+    </Grid>
+</Window>

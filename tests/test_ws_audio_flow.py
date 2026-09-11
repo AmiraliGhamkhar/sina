@@ -172,3 +172,30 @@ def test_provider_fault_surfaces_as_error_frame(client, app):
             assert "provider exploded" in err["message"]
     finally:
         registry.unregister(ProviderKind.STT, "boom")
+
+
+def test_idle_session_receives_heartbeat_pings_before_timeout(tmp_path):
+    """Phase 8 keepalive: an open-but-silent session gets heartbeat.ping
+    frames at the heartbeat interval; only 3 consecutive silent intervals
+    close the socket with 4408 (same total idle window as before)."""
+
+    from api.main import create_app
+    from fastapi.testclient import TestClient
+
+    from tests.conftest import make_settings
+
+    settings = make_settings(tmp_path, websocket={"heartbeat_seconds": 1, "max_session_minutes": 1})
+    app = create_app(settings)
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws/v1/transcribe?token=dev-token-1234567890") as ws:
+            ws.send_json({"v": 1, "type": "session.start"})
+            started = ws.receive_json()
+            assert started["type"] == "session.started"
+            # stay silent: the mock provider may still flush queued interims —
+            # skip transcript frames and wait for the keepalive
+            first = _read_until(ws, "heartbeat.ping", limit=400)
+            assert first["server_time_ms"] > 0
+            # a pong keeps the session alive (any frame resets the idle count)
+            ws.send_json({"v": 1, "type": "pong"})
+            second = _read_until(ws, "heartbeat.ping", limit=400)
+            assert second["server_time_ms"] >= first["server_time_ms"]

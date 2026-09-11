@@ -42,6 +42,12 @@ security = [
     "argon2-cffi>=23.1",
     "cryptography>=42.0",
 ]
+# Phase 8 — optional OTel tracing (metrics-only without it)
+observability = [
+    "opentelemetry-sdk>=1.24",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.24",
+    "opentelemetry-instrumentation-fastapi>=0.45b0",
+]
 
 [build-system]
 requires = ["setuptools>=68"]

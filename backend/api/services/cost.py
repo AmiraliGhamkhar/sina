@@ -6,10 +6,10 @@ when the day's total reaches ``budget_tokens`` the routing layer receives
 ``cloud_excluded=True`` — a *soft stop*: cloud spend halts, local providers
 keep serving so dictation/note workflows never fully die mid-day.
 
-Deliberately in-memory: durable spend/usage history is the Phase 7
-``ai_requests`` table's job (same fields, per the API.md note); the ledger is
-only the fast path the router consults. A restart resets to zero — an
-acceptable fail-open for a cost guard (never a privacy one).
+The ledger is the fast path the router consults; durable spend/usage history
+lives in the Phase 7 ``ai_requests`` table. Phase 8 adds boot-time
+``backfill()`` from that table, so a restart mid-day no longer resets the
+budget (fail-open only while the DB is unreachable at boot).
 """
 from __future__ import annotations
 
@@ -40,6 +40,15 @@ class CostLedger:
         self._roll()
         self._total += tokens
         self._by_provider[provider] += tokens
+
+    def backfill(self, by_provider: dict[str, int]) -> None:
+        """Phase 8: seed today's totals from the durable ``ai_requests`` table
+        (boot-time reload — a restart no longer resets the day's budget)."""
+        self._roll()
+        for provider, tokens in by_provider.items():
+            if tokens > 0:
+                self._total += int(tokens)
+                self._by_provider[provider] += int(tokens)
 
     @property
     def enabled(self) -> bool:

@@ -256,18 +256,41 @@ Done notes (deviations recorded honestly):
   no background auto-refresh timer yet (token TTL 30 min; re-login required
   after expiry in the current client).
 
-## Phase 8 — Hardening & release
-- Prometheus `/metrics` (+optional OTel traces), Grafana dashboard shipped in
-  infrastructure; structured error budgets.
-- Load test: 20 concurrent WS sessions on 4 GB VM w/ local llama-server —
-  p50/p95 transcript latency recorded; soak 2 h.
-- Windows installer: MSIX + signing, auto-update policy, first-run wizard
-  (server URL, CA pin, mic test, hotkey); crash-telemetry with no payload
-  capture.
-- Security pass: dependency audit, CSP-ish hardening N/A (desktop) but TLS
-  pinning review, secret-scan in CI, pen-test checklist for gateway.
-- Acceptance: release checklist in docs; all spec §19 engineering rules
-  re-verified; regulatory-boundary language reviewed (assistive-only).
+## Phase 8 — Hardening & release ✅ (done in this build — see honesty ledger)
+- Prometheus `/metrics` live (dependency-free text exposition,
+  `medicalscribe_*` series, route/status labels, latency quantiles p50/p95/p99
+  + exact sum/count); optional OTel tracing (`observability` extra +
+  `MS_OBSERVABILITY__OTEL_ENABLED`, OTLP gRPC); Grafana dashboard shipped
+  (`infrastructure/prometheus/grafana-dashboard.json`, compose
+  `--profile monitoring`).
+- WS app-level keepalive: server sends `heartbeat.ping` on idle (one
+  heartbeat interval), client auto-pongs; 3 silent intervals still close
+  4408 (nginx already tuned to 3600 s read/send timeouts).
+- Cost-budget counters are now durable: the ledger backfills today's tokens
+  from `ai_requests` at boot — a mid-day restart no longer resets the budget.
+- CI hardening: backend tests run against **real PostgreSQL 16 + Redis 7
+  services** (fresh DB per test); `pip-audit`; `gitleaks` full-history secret
+  scan (`.gitleaks.toml` allowlists synthetic test fixtures only).
+- Load test: `infrastructure/load/ws_loadtest.py` — 20 concurrent sessions ×
+  15 s verified against the mock STT (20/20 completed, 0 errors, handshake
+  p95 = 14 ms, per-final arrival p50 ≈ 1.1 s on the sandbox CPU).
+- First-run wizard in the WPF client (server URL + connectivity probe,
+  microphone selection, hotkey notice; runs before DI so the saved URL is
+  what gets wired).
+- MSIX: manifest + `.appinstaller` auto-update templates
+  (`client/packaging/`) + full packaging/signing runbook in
+  `docs/RELEASE.md`; the actual MSIX build needs a Windows machine
+  (makeappx/SignTool are Windows-only) — NOT yet automated on the CI Windows
+  runner.
+- Security: `docs/SECURITY.md` (env checklist, data-hygiene invariants,
+  gateway pen-test checklist, accepted risks); release runbook
+  `docs/RELEASE.md` incl. regulatory-boundary review step.
+- Done-notes (honesty ledger): the 20-session number is on the **mock STT
+  path in a sandbox** — the roadmap's 4 GB VM + local llama-server p50/p95
+  soak (2 h) still needs real hardware; MSIX build/sign is a documented
+  manual Windows step, not CI-automated; CA-thumbprint pinning in the WPF
+  client settings remains a manual review item (no global TLS-bypass flags
+  exist — verified).
 
 ## Standing engineering constraints (all phases)
 

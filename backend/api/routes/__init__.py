@@ -11,6 +11,7 @@ from api.routes.auth import router as auth_router
 from api.routes.clinical import router as clinical_router
 from api.routes.health import router as health_router
 from api.routes.meta import router as meta_router
+from api.routes.metrics import router as metrics_router
 from api.routes.providers import router as providers_router
 from api.routes.reports import router as reports_router
 from api.routes.templates import router as templates_router
@@ -31,5 +32,5 @@ API_ROUTERS: list[APIRouter] = [
     clinical_router,
     admin_router,
 ]
-ROOT_ROUTERS: list[APIRouter] = [health_router]
+ROOT_ROUTERS: list[APIRouter] = [health_router, metrics_router]
 WS_ROUTERS: list[APIRouter] = [ws_router]

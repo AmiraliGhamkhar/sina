@@ -47,6 +47,9 @@ public sealed class AppSettings
 
     // Diagnostics
     public bool VerboseLogging { get; set; }
+
+    // Phase 8 first-run wizard: shown once, until the clinician saves or skips
+    public bool IsFirstRun { get; set; } = true;
 }
 
 public interface ISettingsStore

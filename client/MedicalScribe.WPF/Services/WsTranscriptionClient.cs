@@ -323,6 +323,11 @@ public sealed class WsTranscriptionClient : ITranscriptionStream
                 _startedTcs?.TrySetException(new InvalidOperationException(
                     $"server rejected session.start: {fatal.Message}"));
                 break;
+            case WsHeartbeatEvent:
+                // Phase 8 keepalive: server ping → immediate pong (fire-and-
+                // forget; a dropped pong must never stall the receive loop)
+                _ = SendPongAsync();
+                break;
         }
         EventReceived?.Invoke(this, evt);
     }
@@ -380,6 +385,19 @@ public sealed class WsTranscriptionClient : ITranscriptionStream
         finally
         {
             _sendLock.Release();
+        }
+    }
+
+    private async Task SendPongAsync()
+    {
+        try
+        {
+            await SendControlFrameAsync("{\"v\":1,\"type\":\"pong\"}", CancellationToken.None)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _log.Info($"pong send failed: {ex.Message}");
         }
     }
 

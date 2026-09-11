@@ -331,17 +331,37 @@ async def _media_loop(
     settings = websocket.app.state.settings
     metrics = websocket.app.state.metrics
     max_s = settings.websocket.max_session_minutes * 60
-    recv_timeout = float(settings.websocket.heartbeat_seconds * 3)
+    # Phase 8 app-level keepalive: wait one heartbeat interval per recv; on
+    # idle send heartbeat.ping. The hard idle close (4408) still fires after
+    # 3 consecutive silent intervals (same window as before) — pings keep
+    # intermediaries (nginx read timeout, NATs) from reaping a live-but-quiet
+    # dictation session and give the client a liveness signal.
+    recv_timeout = float(settings.websocket.heartbeat_seconds)
+    max_missed = 3
+    missed = 0
     last_audio_at = time.time()
 
     while True:
         received = await _recv(websocket, timeout=recv_timeout)
         if received is None:
+            missed += 1
+            if missed >= max_missed:
+                await send_frame(
+                    ws_error_frame(ErrorCode.SESSION_STATE, "idle timeout", recoverable=False)
+                )
+                await websocket.close(code=WS_CLOSE_TIMEOUT)
+                return
+            metrics.incr("ws_heartbeat_pings")
             await send_frame(
-                ws_error_frame(ErrorCode.SESSION_STATE, "idle timeout", recoverable=False)
+                {
+                    "v": 1,
+                    "type": "heartbeat.ping",
+                    "session_id": session.session_id,
+                    "server_time_ms": int(time.time() * 1000),
+                }
             )
-            await websocket.close(code=WS_CLOSE_TIMEOUT)
-            return
+            continue
+        missed = 0
 
         kind, payload = received
         if kind == "bytes":
