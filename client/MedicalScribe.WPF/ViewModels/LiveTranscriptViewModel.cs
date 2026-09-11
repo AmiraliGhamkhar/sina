@@ -122,7 +122,7 @@ public sealed partial class LiveTranscriptViewModel : ObservableObject, ILiveTra
     }
 
     private static readonly System.Text.RegularExpressions.Regex SentenceSplit =
-        new("(?<=[.!?؟؛])\s+", System.Text.RegularExpressions.RegexOptions.Compiled);
+        new(@"(?<=[.!?؟؛])\s+", System.Text.RegularExpressions.RegexOptions.Compiled);
 
     /// <summary>Split on sentence-final punctuation, KEEPING the punctuation
     /// attached — mirrors the server's delete-last-sentence semantics.</summary>
