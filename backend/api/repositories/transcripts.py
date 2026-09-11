@@ -98,6 +98,39 @@ class TranscriptRepository:
             )
             return result.scalar_one_or_none()
 
+    async def list_by_encounter(self, encounter_id: str, *, limit: int = 50) -> list[dict[str, Any]]:
+        """Session summaries (no segment text) for an encounter, newest first."""
+        from sqlalchemy import func
+
+        seg_count = (
+            select(func.count())
+            .where(TranscriptSegment.transcript_id == Transcript.session_id)
+            .correlate(Transcript)
+            .scalar_subquery()
+        )
+        async with self._sm() as session:
+            rows = (
+                await session.execute(
+                    select(Transcript, seg_count)
+                    .where(Transcript.encounter_id == encounter_id)
+                    .order_by(Transcript.started_at.desc())
+                    .limit(limit)
+                )
+            ).all()
+            return [
+                {
+                    "session_id": t.session_id,
+                    "provider": t.provider,
+                    "language": t.language,
+                    "status": t.status,
+                    "segment_count": int(n or 0),
+                    "audio_duration_ms": t.audio_duration_ms,
+                    "started_at": t.started_at.isoformat() if t.started_at else None,
+                    "ended_at": t.ended_at.isoformat() if t.ended_at else None,
+                }
+                for t, n in rows
+            ]
+
     async def snapshot(self, session_id: str) -> dict[str, Any] | None:
         """REST-shaped view from durable rows (GET fallback after LRU)."""
         async with self._sm() as session:

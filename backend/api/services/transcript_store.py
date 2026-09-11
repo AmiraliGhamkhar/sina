@@ -348,6 +348,29 @@ class TranscriptStore:
                 if t.encounter_id == encounter_id
             ]
 
+    def summaries_for_encounter(self, encounter_id: str) -> list[dict[str, Any]]:
+        """Listing summaries (no segment payloads) for the in-memory view."""
+        with self._lock:
+            out = []
+            for t in self._by_session.values():
+                if t.encounter_id != encounter_id:
+                    continue
+                out.append(
+                    {
+                        "session_id": t.session_id,
+                        "provider": t.provider,
+                        "language": t.language,
+                        "status": "open" if t.ended_at is None else "completed",
+                        "segment_count": len(t.segments),
+                        "audio_duration_ms": int(
+                            ((t.ended_at or time.time()) - t.started_at) * 1000
+                        ),
+                        "started_at": None,  # wall-clock ts not kept in memory rows
+                        "ended_at": None,
+                    }
+                )
+            return out
+
     # -- Phase 6: prompt/report assembly ------------------------------------------
 
     def assemble(self, session_id: str, normalizer=None) -> dict[str, Any] | None:

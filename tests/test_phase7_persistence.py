@@ -492,3 +492,68 @@ def test_ws_per_user_session_cap(db_client):
             frame = over.receive_json()
             assert frame["type"] == "error"
             assert frame["code"] == "RATE_LIMITED"
+
+
+def test_transcript_listing_by_encounter(db_client, db_app):
+    """Phase 8: GET /transcripts?encounter_id=… merges the live memory view
+    with durable rows and survives memory eviction."""
+
+    def _read_until_completed(ws):
+        for _ in range(200):
+            frame = ws.receive_json()
+            if frame.get("type") == "session.completed":
+                return frame
+        raise AssertionError("no session.completed")
+
+    with db_client.websocket_connect(
+        "/ws/v1/transcribe?token=dev-token-1234567890"
+    ) as ws:
+        ws.send_json({"v": 1, "type": "session.start", "encounter_id": "enc_list_1"})
+        assert ws.receive_json()["type"] == "session.started"
+        ws.send_json({"v": 1, "type": "session.stop"})
+        _read_until_completed(ws)
+
+    resp = db_client.get("/api/v1/transcripts", params={"encounter_id": "enc_list_1"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["total"] == 1
+    entry = body["transcripts"][0]
+    assert entry["status"] == "completed"
+    assert entry["session_id"].startswith("ws_")
+    # listing stays light: no segment payloads
+    assert "segments" not in entry
+
+    # memory eviction → durable rows serve the same listing (flush is async)
+    db_app.state.transcript_store._by_session.clear()  # noqa: SLF001 — eviction
+
+    def durable_total():
+        r = db_client.get("/api/v1/transcripts", params={"encounter_id": "enc_list_1"})
+        return r.json()["total"] if r.json()["total"] == 1 else 0
+
+    assert _poll(durable_total) == 1
+    # unrelated encounter → empty, not an error
+    assert (
+        db_client.get("/api/v1/transcripts", params={"encounter_id": "enc_none"}).json()
+        == {"transcripts": [], "total": 0}
+    )
+
+
+def test_transcript_listing_memory_mode(client):
+    """The listing works without a database (live in-memory sessions only)."""
+
+    def _read_until_completed(ws):
+        for _ in range(200):
+            frame = ws.receive_json()
+            if frame.get("type") == "session.completed":
+                return frame
+        raise AssertionError("no session.completed")
+
+    with client.websocket_connect("/ws/v1/transcribe?token=dev-token-1234567890") as ws:
+        ws.send_json({"v": 1, "type": "session.start", "encounter_id": "enc-mem-1"})
+        assert ws.receive_json()["type"] == "session.started"
+        ws.send_json({"v": 1, "type": "session.stop"})
+        _read_until_completed(ws)
+
+    body = client.get("/api/v1/transcripts", params={"encounter_id": "enc-mem-1"}).json()
+    assert body["total"] == 1
+    assert body["transcripts"][0]["status"] == "completed"

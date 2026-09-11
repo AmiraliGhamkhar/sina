@@ -126,10 +126,11 @@ honestly.
    reads after eviction/restart, verified against a real server restart),
    but integration tests run on sqlite+aiosqlite, not a live Postgres — the
    compose-profile CI job with real postgres/redis is still open (Phase 8).
-   Cost-budget counters remain in-process (a restart resets the day). The
-   WPF client keeps the refresh token in memory and sends it on logout, but
-   has no background auto-refresh timer yet — after the 30-minute access
-   TTL the user re-logs in.
+   Cost-budget counters are durable since Phase 8. The WPF client rotates
+   tokens proactively (refresh timer fires 60 s before access-token expiry,
+   retries on network blips, drops to login only when the rotation is
+   rejected) — compile + unit-verified in CI; runtime behavior still needs
+   the manual Windows pass (see #1).
 3. Heartbeat frames are idle-timeout only (4408); explicit app-level pings +
    nginx read-timeout tuning are deferred to Phase 8.
 4. Cloud STT/LLM adapters (Deepgram/Speechmatics/OpenAI/Anthropic/Gemini)

@@ -126,6 +126,7 @@ After eviction/restart `GET` serves the same REST shape from durable rows.
 
 | Method | Path | Auth | Notes |
 |---|---|---|---|
+| GET | `/api/v1/transcripts?encounter_id=…&limit=` | optional | **Phase 8**: encounter-scoped listing — live in-memory sessions first, durable rows merged + deduped (works in memory-only mode with live sessions). Light summaries: `{session_id, provider, language, status, segment_count, audio_duration_ms, started_at?, ended_at?}` — no segment payloads. |
 | GET | `/api/v1/transcripts/{session_id}` | optional | `TranscriptResponse{session_id, provider, language, status(open\|completed), segment_count, audio_duration_ms, segments[]}` where each segment is `{segment_id, text, start_ms, end_ms, language, confidence, edited, revision, updated_at, kind (dictated\|paragraph\|section\|finalized_section\|repeat), meta (marker payload, e.g. section_title)}`. 404 `NOT_FOUND` for unknown sessions. |
 | PATCH | `/api/v1/transcripts/{session_id}/segments/{segment_id}` | optional | body `{text}` (≤8000 chars) → `{segment_id, revision, edited, updated_at}`. Identical text is a no-op (revision unchanged). Audited without content. |
 
@@ -134,7 +135,6 @@ These expose what the WS stream finalized; interim frames are never stored.
 ## Planned (contract frozen in phase docs)
 
 - ~~`POST /api/v1/patients/search`, `POST /api/v1/encounters`~~ — shipped in P7 (see Patients & encounters)
-- encounter-scoped transcript listing (`/api/v1/transcripts?encounter_id=…`) — open (session-scoped live API shipped in P2; report listing by encounter shipped in P6)
 - ~~PostgreSQL persistence for templates/reports/revisions~~ — shipped in P7
 - ~~`GET /api/v1/audit/...` (admin)~~ — shipped in P7 (`/api/v1/admin/audit`)
 - Prometheus `/metrics` — P8

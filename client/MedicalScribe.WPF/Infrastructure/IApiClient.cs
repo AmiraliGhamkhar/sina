@@ -27,6 +27,10 @@ public interface IApiClient
     Task<ClientManifestDto?> GetManifestAsync(CancellationToken ct = default);
     Task<IReadOnlyList<ProviderInfoDto>> GetProvidersAsync(bool probeHealth = false, CancellationToken ct = default);
     Task<TokenPairDto> LoginAsync(LoginRequestDto request, CancellationToken ct = default);
+
+    /// <summary>Phase 8: rotate the token pair (one-time refresh token);
+    /// stores the new pair in the token store on success.</summary>
+    Task<TokenPairDto> RefreshAsync(string refreshToken, CancellationToken ct = default);
     Task LogoutAsync(CancellationToken ct = default);
     Task<PrincipalDto?> GetCurrentUserAsync(CancellationToken ct = default);
 

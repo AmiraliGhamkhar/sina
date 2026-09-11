@@ -9,17 +9,43 @@ evicts, and PATCH edits write through to the database when configured.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Query, Request
 
 from api.auth.deps import OptionalPrincipal
 from api.errors import ApiError, ErrorCode
-from api.schemas.transcripts import SegmentEditRequest, TranscriptResponse
+from api.schemas.transcripts import (
+    SegmentEditRequest,
+    TranscriptListResponse,
+    TranscriptResponse,
+)
 
 router = APIRouter(prefix="/transcripts", tags=["transcripts"])
 
 
 def _store(request: Request):
     return request.app.state.transcript_store
+
+
+@router.get("", response_model=TranscriptListResponse)
+async def list_transcripts(
+    request: Request,
+    principal: OptionalPrincipal,
+    encounter_id: str = Query(min_length=1, max_length=64),
+    limit: int = Query(default=50, ge=1, le=200),
+) -> TranscriptListResponse:
+    """Encounter-scoped listing (Phase 8): live in-memory sessions first,
+    then durable rows (deduped) — works in memory-only mode too."""
+    summaries = _store(request).summaries_for_encounter(encounter_id)
+    seen = {s["session_id"] for s in summaries}
+    repo = getattr(request.app.state, "transcript_repo", None)
+    if repo is not None:
+        try:
+            durable = await repo.list_by_encounter(encounter_id, limit=limit)
+        except Exception:  # noqa: BLE001 — listing never breaks on DB lag
+            request.app.state.metrics.incr("transcript_db_write_failures")
+            durable = []
+        summaries.extend(r for r in durable if r["session_id"] not in seen)
+    return TranscriptListResponse(transcripts=summaries[:limit], total=len(summaries))
 
 
 @router.get("/{session_id}", response_model=TranscriptResponse)

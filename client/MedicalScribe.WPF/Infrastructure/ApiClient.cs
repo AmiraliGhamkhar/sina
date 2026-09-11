@@ -70,6 +70,14 @@ public sealed class ApiClient : IApiClient
         return result;
     }
 
+    public async Task<TokenPairDto> RefreshAsync(string refreshToken, CancellationToken ct = default)
+    {
+        var result = await PostAsync<TokenPairDto>(
+            "/api/v1/auth/refresh", new { refresh_token = refreshToken }, ct);
+        _tokens.SetTokens(result.AccessToken, result.RefreshToken, result.ExpiresIn);
+        return result;
+    }
+
     public async Task LogoutAsync(CancellationToken ct = default)
     {
         try

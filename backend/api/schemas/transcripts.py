@@ -34,6 +34,24 @@ class TranscriptResponse(BaseModel):
     segments: list[TranscriptSegmentDto] = Field(default_factory=list)
 
 
+class TranscriptSummary(BaseModel):
+    """Listing view (GET /transcripts?encounter_id=…) — no segment payloads."""
+
+    session_id: str
+    provider: str | None = None
+    language: str | None = None
+    status: str = "open"
+    segment_count: int = 0
+    audio_duration_ms: int = 0
+    started_at: str | None = None
+    ended_at: str | None = None
+
+
+class TranscriptListResponse(BaseModel):
+    transcripts: list[TranscriptSummary] = Field(default_factory=list)
+    total: int = 0
+
+
 class SegmentEditRequest(BaseModel):
     """Clinician edit (spec §5 step 7). Empty string deletes text but keeps
     the segment; never used to *add* segments (commands/reports do that)."""
