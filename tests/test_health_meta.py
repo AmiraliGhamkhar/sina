@@ -64,6 +64,9 @@ def test_manifest_is_data_driven_and_phase_honest(client):
     assert "پاراگراف جدید" in fa_trigger["triggers"]
     # Phase 2 switched the live pipeline on (flag must follow the server)
     assert body["features"]["live_transcription"] is True
+    # Phase 4: draft generation is live (finalize/approve stay gated for later phases)
+    assert body["features"]["report_generation"] is True
+    assert body["features"]["voice_commands"] is False
     assert body["ws_path"] == "/ws/v1/transcribe"
     assert body["max_message_bytes"] > 0
 

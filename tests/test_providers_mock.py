@@ -116,4 +116,6 @@ def test_mock_llm_output_is_json_and_grounds_on_user_text():
     subjective = draft["sections"]["subjective"]
     # numbers / laterality / negation preserved verbatim — mock can't "improve" them
     assert "10 mg" in subjective and "right" in subjective and "no effusion" in subjective
-    assert draft["sections"]["assessment"] == "missing"
+    assert draft["sections"]["assessment"] == "[[MISSING]]"
+    # Phase 4: usage metering is exercised even by the mock
+    assert result.usage is not None and result.usage.total_tokens > 0

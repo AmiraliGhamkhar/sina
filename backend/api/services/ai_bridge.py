@@ -13,7 +13,7 @@ transcription hub (registry-cached; no second construction path).
 """
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from fastapi import WebSocket
 
@@ -99,6 +99,42 @@ def batch_route_request(
         language=language,
         session_id=None,
     )
+
+
+def llm_route_request(
+    app,
+    *,
+    mode: str | None,
+    privacy_required: bool | None,
+    provider: str | None,
+) -> RouteRequest:
+    """Routing request for note drafting (GENERATE_NOTE)."""
+    settings = app.state.settings
+    privacy = (
+        privacy_required if privacy_required is not None else settings.routing.privacy_default
+    )
+    resolved_mode = RoutingMode(mode) if mode else RoutingMode(settings.routing.mode)
+    return RouteRequest(
+        task=TaskKind.GENERATE_NOTE,
+        kind=ProviderKind.LLM,
+        mode=resolved_mode,
+        privacy_required=bool(privacy),
+        preferred=provider or settings.llm.default_provider,
+        strict_preference=False,
+        language=None,
+        session_id=None,
+    )
+
+
+async def select_llm_provider(app, request: RouteRequest) -> tuple[RouteDecision, Any]:
+    """Route + materialize an LLM provider. Raises RoutingError/ProviderError."""
+    candidates = build_candidates(app, ProviderKind.LLM)
+    decision = route(request, candidates)
+    settings = app.state.settings
+    provider = app.state.ai_registry.create(
+        ProviderKind.LLM, decision.provider, settings.provider_config("llm", decision.provider)
+    )
+    return decision, provider
 
 
 async def select_stt_provider(

@@ -84,7 +84,7 @@ Done notes (deviations recorded honestly):
   WAV/PCM16 upload, routed with privacy wall enforced, 413/400 validated,
   audio never persisted, metadata-only audit.
 
-## Phase 4 — LLM adapters & report prompts (next)
+## Phase 4 — LLM adapters & report prompts ✅ (done — this build)
 - `openai`, `anthropic`, `gemini` adapters (native SDKs avoided: httpx only);
   usage/token accounting into metrics + `ai_requests`.
 - Grounded note-prompt builder (transcript + patient context + template
@@ -96,7 +96,38 @@ Done notes (deviations recorded honestly):
   hallucination-sensitive fixtures: missing info stays "missing"; numbers /
   laterality / negation preserved or flagged.
 
-## Phase 5 — Router hardening
+
+Done notes (deviations recorded honestly):
+- `openai` (OpenAI-compat transport reuse), `anthropic` (native Messages
+  wire: system extraction, merged same-role turns, required max_tokens,
+  count_tokens health probe) and `gemini` (generateContent + SSE streaming,
+  systemInstruction, x-goog-api-key header — key never in URLs) landed with
+  httpx only; no SDKs. Usage/token accounting flows into `llm_requests:*` +
+  `llm_tokens:<provider>:*` counters and `llm_latency_ms`; the `ai_requests`
+  table (same fields) is Phase 7 backfill.
+- Grounded prompt builder (`api/services/note_prompt.py`): sentinel-delimited
+  TRANSCRIPT/CONTEXT/SECTIONS blocks, strict JSON schema in the system
+  contract, one repair round-trip (`MS_LLM__REPAIR_ENABLED`), template-order
+  reconciliation with `[[MISSING]]` semantics. Light fidelity check (numbers/
+  laterality/negation vs. transcript — "preserved or flagged") ships now;
+  the full validator + dosage dictionary is Phase 6 as planned.
+- PHI: best-effort identifier scrub before ANY cloud call
+  (`MS_LLM__CLOUD__REDACT_PHI_FOR_CLOUD`, default on) — the actual guarantee
+  remains the privacy wall (privacy_required never routes cloud; tested).
+- llama-server: `GET /props` capability discovery (cached; failure-tolerant)
+  + usage metering. Mock LLM upgraded to obey the report-prompt contract
+  (fills only the first section verbatim, everything else [[MISSING]]) so the
+  grounding pipeline is testable without keys — legacy prompts keep the old
+  canned shape.
+- Acceptance met: `POST /api/v1/reports/{encounter}/draft` works against the
+  mock with 135 backend tests; hallucination fixture (fabricated 80 mg)
+  produces `unverified_number`, unsupported sections stay missing; invalid-
+  JSON repair succeeds once then fails closed with 502.
+- Not covered honestly: no live-account calls to OpenAI/Anthropic/Gemini
+  (wire conformance is MockTransport-fixture verified); report storage,
+  editing endpoints and finalize/approve land with P6/P7.
+
+## Phase 5 — Router hardening (next)
 - HealthTracker fed by real task outcomes (not just probes); Redis-backed
   shared health + queue depth; latency EWMA per provider.
 - Runtime fallback: on `ProviderError(retryable)` → next in

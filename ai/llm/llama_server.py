@@ -60,6 +60,7 @@ class LlamaServerProvider(LLMProvider):
             self._compat_config, client=client, provider_name=self.name
         )
         self._streaming_enabled = bool(self._cfg.get("streaming", True))
+        self._props: Mapping[str, Any] | None = None
         self._capabilities = ProviderCapabilities(
             privacy=PrivacyClass.LOCAL,
             supports_streaming=self._streaming_enabled,
@@ -94,6 +95,22 @@ class LlamaServerProvider(LLMProvider):
                 latency_ms=round((time.perf_counter() - started) * 1000, 1),
                 detail=f"{type(exc).__name__}",
             )
+
+    async def props(self) -> Mapping[str, Any]:
+        """Capability discovery: ``GET /props`` (model path, n_ctx, ...).
+
+        Cached after first success; failures return {} so callers never block
+        on an unavailable optional endpoint. Feeds capacity checks before long
+        prompts (Phase 5 queue-depth builds on this).
+        """
+        if self._props is not None:
+            return self._props
+        try:
+            resp = await self._client.client.get(f"{self.base_url}/props", timeout=5.0)
+            self._props = resp.json() if resp.status_code == 200 else {}
+        except Exception:
+            self._props = {}
+        return self._props
 
     async def complete(
         self,

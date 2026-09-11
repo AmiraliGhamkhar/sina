@@ -33,7 +33,7 @@ Backend (Linux/macOS/Windows, Python 3.11+; production images use 3.12+):
 ```bash
 python -m venv .venv && .venv/bin/pip install -e ".[dev]"
 cp .env.example .env                     # set MS_AUTH__DEV_TOKEN, secrets optional in Phase 1
-.venv/bin/python -m pytest               # 108 tests: health, auth, ws, providers/adapters, router, batch
+.venv/bin/python -m pytest               # 135 tests: + LLM adapters, grounded prompts, draft API
 .venv/bin/python -m uvicorn api.main:app --app-dir backend --port 8000
 curl localhost:8000/health
 curl "localhost:8000/api/v1/providers?probe=health"
@@ -62,7 +62,7 @@ credentials arrive in Phase 7; the server answers 501 + a stable
 | 1 | References → assessment → WPF shell → FastAPI shell → REST connectivity (+ WS **control plane**, provider contracts, compose/nginx/env) | ✅ done (this build) |
 | 2 | NAudio capture → WS audio → mock STT stream → live transcript (+ session transcript GET/PATCH) | ✅ done (this build) |
 | 3 | STT adapters: local whisper-server, qwen-asr, Speechmatics, Deepgram (stream+batch) + batch REST endpoint | ✅ done (this build) |
-| 4 | LLM adapters: llama-server (transport shipped in P1), OpenAI/Anthropic/Gemini + prompts | partial (P1 shipped llama-server client) |
+| 4 | LLM adapters: llama-server + props, OpenAI/Anthropic/Gemini, grounded draft endpoint | ✅ done (this build) |
 | 5 | Router: live health/latency/queue-depth, fallback chains (pure core + tracker shipped in P1) | partial |
 | 6 | Voice commands, terminology, templates, report generation, validation warnings | planned (command catalog served by manifest) |
 | 7 | PostgreSQL + SQLAlchemy + Alembic, JWT/refresh/argon2, Redis rate-limit, audit table, encrypted provider rows | planned (URL normalizer, JWT codec, JSONL audit shipped in P1) |
@@ -111,10 +111,14 @@ credentials arrive in Phase 7; the server answers 501 + a stable
    Phase 7. Logout still has no revocation store.
 3. Heartbeat frames are idle-timeout only (4408); explicit app-level pings +
    nginx read-timeout tuning are deferred to Phase 8.
-4. Cloud STT adapters (Deepgram/Speechmatics) are verified against recorded
-   fixtures + scripted WS transports, never against live vendor accounts
-   (no credentials in this environment); first credentialed deployment should
-   smoke `GET /api/v1/providers?probe=health` and one batch upload per vendor.
+4. Cloud STT/LLM adapters (Deepgram/Speechmatics/OpenAI/Anthropic/Gemini)
+   are verified against recorded fixtures + scripted transports, never
+   against live vendor accounts (no credentials in this environment); first
+   credentialed deployment should smoke `GET /api/v1/providers?probe=health`
+   and one batch transcribe + one draft per vendor.
+5. Report drafts are stateless (client-held): server-side draft storage,
+   section PATCH and finalize/approve land in Phase 6/7. `ai_requests` usage
+   rows are backfilled by the Phase 7 DB (counters carry it meanwhile).
 5. Cloud LLM adapters (Phase 4) and the router's live latency/queue
    signals (Phase 5) are interface-ready but unimplemented.
 6. Voice-command *parsing* (Phase 6) — the catalog + protocol frames exist,

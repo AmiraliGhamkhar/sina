@@ -39,6 +39,12 @@ data must not echo back through error paths).
 | GET | `/api/v1/providers?kind=stt|llm&probe=health` | optional | registry listing: `{name, kind, description, configured, capabilities{privacy_class,...}, health?}` |
 | GET | `/api/v1/observability/stats` | optional | process metrics snapshot (Prometheus endpoint: P8) |
 
+## Reports (draft generation landed in Phase 4)
+
+| Method | Path | Auth | Notes |
+|---|---|---|---|
+| POST | `/api/v1/reports/{encounter_id}/draft` | optional | JSON body: `{transcript (1..80k chars), template?{name, sections[{id,title,instruction}]}, patient_context?{name,age,sex,mrn,encounter_date}, language, mode, privacy_required, provider}`. Grounded strict-JSON drafting with one repair round-trip; response carries `sections[]` (template order), `missing_sections[]` (`[[MISSING]]` = no transcript evidence — never invented), `warnings[]` (`unverified_number` / `laterality_unverified` / `negation_shift_suspected`), `phi_redaction_applied` and token `usage`. Routing obeys the privacy wall; cloud providers receive PHI-scrubbed input by default. Drafts are stateless until Phase 7 (finalize/approve land in P6/P7). Errors: 422 VALIDATION, 502 PROVIDER_UNAVAILABLE (incl. unrepairable JSON), 503 NO_PROVIDER. |
+
 ## Batch transcription (landed in Phase 3)
 
 | Method | Path | Auth | Notes |
@@ -62,7 +68,7 @@ These expose what the WS stream finalized; interim frames are never stored.
 - `POST /api/v1/patients/search`, `POST /api/v1/encounters` — P7
 - encounter-scoped transcript/report APIs (`/api/v1/transcripts?encounter_id=…`) — P7 (session-scoped live API already shipped in P2)
 - `POST /api/v1/report-templates` (+ `POST /report-templates/extract-from-example`) — P6
-- `POST /api/v1/reports/{encounter_id}/draft` → `PATCH .../sections` → `POST .../finalize` → `POST .../approve` — P6/P7 (two-step sign-off is non-negotiable)
+- `PATCH /api/v1/reports/{encounter}/draft/sections/{id}` (server-side storage) → `POST .../finalize` → `POST .../approve` — P6/P7 (two-step sign-off is non-negotiable; drafts are client-held until P7)
 - `GET /api/v1/audit/...` (admin) — P7
 - WS: see `docs/WEBSOCKET_PROTOCOL.md`
 

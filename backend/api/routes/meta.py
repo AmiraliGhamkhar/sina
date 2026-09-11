@@ -43,7 +43,8 @@ async def client_manifest(request: Request, principal: OptionalPrincipal) -> Man
         features={  # type: ignore[typeddict-item]
             "live_transcription": features_ok_phase,
             "voice_commands": PHASE >= 6,
-            "report_generation": PHASE >= 6,
+            # draft generation live from P4; finalize/approve flow lands in P6/P7
+            "report_generation": PHASE >= 4,
             "editing_enabled": True,
             "cloud_providers_enabled": bool(
                 settings.stt.deepgram.api_key or settings.stt.speechmatics.api_key

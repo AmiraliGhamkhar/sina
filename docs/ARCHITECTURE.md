@@ -75,8 +75,13 @@ noted in docs/ASSESSMENT.md §2), `qwen-asr` (OpenAI-audio-compatible service),
 prerecorded, keyword boost for drug names/laterality words). Cloud WS traffic
 goes through the `ai/stt/ws_transport.WsTransport` seam — tests run the exact
 protocol against scripted transports (zero network). LLM — `llama-server`
-(shipped, §12 external-service rule), planned: `openai`, `anthropic`,
-`gemini`. The two mocks keep the full pipeline CI-testable without keys.
+(shipped + `/props` capability discovery, §12 external-service rule), and
+Phase 4 shipped `openai` (shared openai-compat transport), `anthropic`
+(native Messages wire) and `gemini` (generateContent + SSE) — httpx only, no
+SDKs, usage metered into the shared counters. PHI scrub
+(`llm.cloud.redact_phi_for_cloud`) guards every cloud prompt; the privacy
+wall remains the actual guarantee. The two mocks keep the full pipeline
+CI-testable without keys.
 
 ## 4. AI routing (`ai/router`)
 
@@ -107,9 +112,10 @@ mic (NAudio WASAPI, 16k mono PCM16)                    [done P2]
   → final segments in TranscriptStore (in-mem LRU)     [done P2]
   → Transcript/Segment tables                          [P7]
   → edits (clinician) / voice commands (parser, P6)
-  → POST report draft: LLMProvider via prompt built from
-    transcript + template + context ONLY (grounding, §7)
-  → validation pass (numbers/units/laterality/negation/dates/IDs, P6)
+  → POST /reports/{enc}/draft: LLMProvider via prompt built from
+    transcript + template + context ONLY (grounding, §7) [done P4]
+  → light fidelity check on draft (numbers/laterality/negation) [done P4]
+  → full validation pass (units/dates/IDs dictionary, P6)
     → warnings frames → clinician review
   → explicit finalize → explicit approve → audit + immutable version  [P6/P7]
 ```

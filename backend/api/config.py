@@ -75,16 +75,29 @@ class CloudLlmConfig(BaseModel):
 
     openai_api_key: SecretStr | None = None
     openai_model: str = "gpt-4o-mini"
+    openai_base_url: str | None = None  # egress proxy / Azure-style gateway
     anthropic_api_key: SecretStr | None = None
     anthropic_model: str = "claude-sonnet-4-20250514"
+    anthropic_base_url: str | None = None
     gemini_api_key: SecretStr | None = None
     gemini_model: str = "gemini-2.0-flash"
+    gemini_base_url: str | None = None
+    timeout_s: float = 120.0
+    max_retries: int = 2
+    #: best-effort PHI scrub of transcript/context before ANY cloud provider
+    #: sees it (privacy_required encounters never route cloud anyway)
+    redact_phi_for_cloud: bool = True
 
 
 class LlmConfig(BaseModel):
     llama_server: LlamaServerConfig = Field(default_factory=LlamaServerConfig)
     cloud: CloudLlmConfig = Field(default_factory=CloudLlmConfig)
     default_provider: str | None = None  # registry name; None → router decides
+    #: note-drafting knobs (POST /api/v1/reports/{encounter}/draft)
+    report_temperature: float = 0.2
+    report_max_tokens: int = 1600
+    #: single strict-JSON repair round-trip on unparseable model output
+    repair_enabled: bool = True
 
 
 class WhisperServerConfig(BaseModel):
@@ -227,6 +240,31 @@ class Settings(BaseSettings):
             }
         if kind == "llm" and name == "mock":
             return {}
+        cl = self.llm.cloud
+        if kind == "llm" and name == "openai":
+            return {
+                "base_url": cl.openai_base_url or "https://api.openai.com",
+                "model": cl.openai_model,
+                "api_key": cl.openai_api_key.get_secret_value() if cl.openai_api_key else None,
+                "timeout_s": cl.timeout_s,
+                "max_retries": cl.max_retries,
+            }
+        if kind == "llm" and name == "anthropic":
+            return {
+                "base_url": cl.anthropic_base_url or "https://api.anthropic.com",
+                "model": cl.anthropic_model,
+                "api_key": cl.anthropic_api_key.get_secret_value() if cl.anthropic_api_key else None,
+                "timeout_s": cl.timeout_s,
+                "max_retries": cl.max_retries,
+            }
+        if kind == "llm" and name == "gemini":
+            return {
+                "base_url": cl.gemini_base_url or "https://generativelanguage.googleapis.com",
+                "model": cl.gemini_model,
+                "api_key": cl.gemini_api_key.get_secret_value() if cl.gemini_api_key else None,
+                "timeout_s": cl.timeout_s,
+                "max_retries": cl.max_retries,
+            }
         if kind == "stt" and name == "mock":
             return {"interim_delay_s": self.stt.mock_interim_delay_s}
         if kind == "stt" and name == "whisper-local":

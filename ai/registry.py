@@ -160,8 +160,11 @@ def build_default_registry() -> ProviderRegistry:
     Each addition stays a single ``register()`` call plus a module under
     file should need to change.
     """
+    from ai.llm.anthropic import AnthropicProvider, anthropic_configured
+    from ai.llm.gemini import GeminiProvider, gemini_configured
     from ai.llm.llama_server import LlamaServerProvider, llama_server_configured
     from ai.llm.mock import MockLlmProvider
+    from ai.llm.openai import OpenAIProvider, openai_configured
     from ai.stt.deepgram import DeepgramProvider, deepgram_configured
     from ai.stt.mock import MockSttProvider
     from ai.stt.qwen_asr import QwenAsrProvider, qwen_asr_configured
@@ -263,6 +266,57 @@ def build_default_registry() -> ProviderRegistry:
                 "key via MS_STT__SPEECHMATICS__* env."
             ),
             config_keys=("stt.speechmatics.api_key",),
+        )
+    )
+    registry.register(
+        ProviderDescriptor(
+            name="openai",
+            kind=ProviderKind.LLM,
+            capabilities=ProviderCapabilities(
+                privacy=PrivacyClass.CLOUD,
+                supports_streaming=True,
+                languages=("*",),
+                cost_hint_per_unit=0.6,
+                latency_hint_ms=2500,
+            ),
+            factory=lambda cfg: OpenAIProvider(cfg),
+            configured=openai_configured,
+            description="OpenAI chat completions (key via MS_LLM__CLOUD__* env).",
+            config_keys=("llm.cloud.openai_api_key",),
+        )
+    )
+    registry.register(
+        ProviderDescriptor(
+            name="anthropic",
+            kind=ProviderKind.LLM,
+            capabilities=ProviderCapabilities(
+                privacy=PrivacyClass.CLOUD,
+                supports_streaming=True,
+                languages=("*",),
+                cost_hint_per_unit=3.0,
+                latency_hint_ms=3000,
+            ),
+            factory=lambda cfg: AnthropicProvider(cfg),
+            configured=anthropic_configured,
+            description="Anthropic messages API (key via MS_LLM__CLOUD__* env).",
+            config_keys=("llm.cloud.anthropic_api_key",),
+        )
+    )
+    registry.register(
+        ProviderDescriptor(
+            name="gemini",
+            kind=ProviderKind.LLM,
+            capabilities=ProviderCapabilities(
+                privacy=PrivacyClass.CLOUD,
+                supports_streaming=True,
+                languages=("*",),
+                cost_hint_per_unit=0.7,
+                latency_hint_ms=2200,
+            ),
+            factory=lambda cfg: GeminiProvider(cfg),
+            configured=gemini_configured,
+            description="Google Gemini generateContent (key via MS_LLM__CLOUD__* env).",
+            config_keys=("llm.cloud.gemini_api_key",),
         )
     )
     registry.register(

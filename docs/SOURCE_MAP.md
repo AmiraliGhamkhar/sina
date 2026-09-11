@@ -156,3 +156,15 @@ patterns carry in-file attribution headers.
   rather than live accounts.
 - openai-compat HTTP plumbing for qwen-asr mirrors the llama-server pattern
   already in `ai/llm/openai_compat.py` (same repo module, not a reference one).
+
+## Phase 4 usage log (2026-09-11)
+
+- Phlox (MIT) — the *strict-JSON + repair round-trip* idea for structured note
+  output informed `api/services/note_prompt.py` (message shape + fail-closed
+  after one attempt). No code copied; prompt contract, sentinels, fidelity
+  check and provider adapters are this repo's own.
+- open-medical-scribe (MIT) — mock-provider-parity rule followed: the mock
+  LLM now satisfies the same grounding contract as real providers so the
+  pipeline is honest end-to-end without keys.
+- Cloud LLM wires (OpenAI/Anthropic/Gemini) implemented from public API
+  shapes, fixture-verified; SDKs deliberately avoided (httpx-only rule).
