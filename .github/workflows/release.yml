@@ -36,13 +36,16 @@ jobs:
           dotnet-version: "10.0.x"
 
       - name: Publish (self-contained, single file)
+        shell: pwsh
+        env:
+          TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
         run: >-
           dotnet publish client/MedicalScribe.WPF/MedicalScribe.WPF.csproj
           -c Release -r win-x64 --self-contained true
           -p:PublishSingleFile=true
           -p:IncludeNativeLibrariesForSelfExtract=true
           -p:EnableCompressionInSingleFile=true
-          -p:Version=${{ github.ref_name }}
+          -p:Version="$($env:TAG.TrimStart('v'))"
           -o publish
 
       - name: Zip + checksum
