@@ -64,4 +64,18 @@ public interface IApiClient
     /// <summary>Terminology normalization preview (reversible; the stored
     /// transcript is never rewritten server-side).</summary>
     Task<NormalizationResultDto?> NormalizeTextAsync(string text, CancellationToken ct = default);
+
+    // -- Model hub (verified downloads + auto-configure) -------------------------
+
+    /// <summary>Server-driven model catalog with live install status.</summary>
+    Task<IReadOnlyList<ModelInfoDto>> GetModelsAsync(CancellationToken ct = default);
+
+    /// <summary>One model's status (progress polling).</summary>
+    Task<ModelInfoDto?> GetModelAsync(string modelId, CancellationToken ct = default);
+
+    /// <summary>Start a verified background download (admin role).</summary>
+    Task<ModelDownloadAcceptedDto> StartModelDownloadAsync(string modelId, CancellationToken ct = default);
+
+    /// <summary>Remove downloaded artifacts (cancels an in-flight download).</summary>
+    Task<ModelDeletedDto> DeleteModelAsync(string modelId, CancellationToken ct = default);
 }

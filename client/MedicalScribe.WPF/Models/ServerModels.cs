@@ -180,3 +180,45 @@ public sealed record NormalizationResultDto(
     [property: JsonPropertyName("normalized")] string Normalized,
     [property: JsonPropertyName("substitutions")] List<SubstitutionDto> Substitutions,
     [property: JsonPropertyName("reversible")] bool Reversible);
+
+// ---- Model hub (GET/POST/DELETE /api/v1/models) ------------------------------
+
+public sealed record ModelFileInfoDto(
+    [property: JsonPropertyName("local_name")] string LocalName,
+    [property: JsonPropertyName("size_bytes")] long SizeBytes,
+    [property: JsonPropertyName("received_bytes")] long ReceivedBytes);
+
+public sealed record ModelInfoDto(
+    [property: JsonPropertyName("id")] string Id,
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("role")] string Role,
+    [property: JsonPropertyName("description")] string Description,
+    [property: JsonPropertyName("license")] string License,
+    [property: JsonPropertyName("license_url")] string? LicenseUrl,
+    [property: JsonPropertyName("source_repo")] string SourceRepo,
+    [property: JsonPropertyName("runtime")] string Runtime,
+    [property: JsonPropertyName("providers")] List<string> Providers,
+    [property: JsonPropertyName("state")] string State,
+    [property: JsonPropertyName("progress")] double? Progress,
+    [property: JsonPropertyName("received_bytes")] long ReceivedBytes,
+    [property: JsonPropertyName("total_bytes")] long TotalBytes,
+    [property: JsonPropertyName("current_file")] string? CurrentFile,
+    [property: JsonPropertyName("error")] string? Error,
+    [property: JsonPropertyName("installed_at")] string? InstalledAt,
+    [property: JsonPropertyName("auto_configured")] bool AutoConfigured,
+    [property: JsonPropertyName("operator_note")] string? OperatorNote,
+    [property: JsonPropertyName("files")] List<ModelFileInfoDto> Files,
+    [property: JsonPropertyName("install_dir")] string InstallDir);
+
+public sealed record ModelListDto(
+    [property: JsonPropertyName("models")] List<ModelInfoDto> Models);
+
+public sealed record ModelDownloadAcceptedDto(
+    [property: JsonPropertyName("model_id")] string ModelId,
+    [property: JsonPropertyName("state")] string State,
+    [property: JsonPropertyName("detail")] string Detail);
+
+public sealed record ModelDeletedDto(
+    [property: JsonPropertyName("model_id")] string ModelId,
+    [property: JsonPropertyName("deleted")] bool Deleted,
+    [property: JsonPropertyName("detail")] string Detail);

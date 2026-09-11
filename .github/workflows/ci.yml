@@ -6,6 +6,7 @@ name: CI
 #   client-linux   C# compile gate via EnableWindowsTargeting (fast feedback
 #                  for syntax/binding errors without waiting for the Windows queue)
 #   client-windows dotnet build + xunit tests for the WPF projects (real run)
+#   client-publish self-contained win-x64 .exe (single-file) → build artifact
 #   docker         compose config + API image build + import smoke
 
 on:
@@ -202,6 +203,45 @@ jobs:
           name: client-test-results-windows
           path: TestResults/*.trx
           if-no-files-found: ignore
+
+  # Self-contained single-file exe: runs on any Windows 10+ x64 box with no
+  # .NET install (user-facing deliverable). Release workflow re-publishes and
+  # attaches the zip to a tagged GitHub Release (see release.yml).
+  client-publish:
+    name: Windows client · self-contained exe (win-x64)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    needs: client-windows # only package what passed tests
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Publish (self-contained, single file)
+        run: >-
+          dotnet publish client/MedicalScribe.WPF/MedicalScribe.WPF.csproj
+          -c Release -r win-x64 --self-contained true
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:EnableCompressionInSingleFile=true
+          -o publish
+
+      - name: Zip
+        shell: pwsh
+        run: |
+          Compress-Archive -Path publish/MedicalScribe.WPF.exe -DestinationPath MedicalScribe-win-x64.zip
+          "sha256: $((Get-FileHash MedicalScribe-win-x64.zip -Algorithm SHA256).Hash)" | Tee-Object sha256.txt
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MedicalScribe-win-x64
+          path: |
+            MedicalScribe-win-x64.zip
+            sha256.txt
+          if-no-files-found: error
 
   docker:
     name: Packaging · compose config + API image

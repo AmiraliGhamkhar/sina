@@ -35,6 +35,7 @@ public enum ScreenKind
     Report,
     Templates,
     AiSettings,
+    Models,
     UserSettings,
 }
 
@@ -56,6 +57,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         ReportViewModel report,
         TemplatesViewModel templates,
         AiSettingsViewModel aiSettings,
+        ModelsViewModel models,
         UserSettingsViewModel userSettings,
         IAuthorizationService auth,
         IServerStatusService status,
@@ -78,6 +80,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         Report = report;
         Templates = templates;
         AiSettings = aiSettings;
+        Models = models;
         UserSettings = userSettings;
 
         NavItems =
@@ -90,6 +93,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             new NavItem(ScreenKind.Report, "Report", "▤"),
             new NavItem(ScreenKind.Templates, "Templates", "▦"),
             new NavItem(ScreenKind.AiSettings, "AI Settings", "⚙"),
+            new NavItem(ScreenKind.Models, "AI Models", "⬇"),
             new NavItem(ScreenKind.UserSettings, "User Settings", "☺"),
         ];
 
@@ -148,6 +152,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     public ReportViewModel Report { get; }
     public TemplatesViewModel Templates { get; }
     public AiSettingsViewModel AiSettings { get; }
+    public ModelsViewModel Models { get; }
     public UserSettingsViewModel UserSettings { get; }
 
     [ObservableProperty]
@@ -182,6 +187,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             ScreenKind.Report => Report,
             ScreenKind.Templates => Templates,
             ScreenKind.AiSettings => AiSettings,
+            ScreenKind.Models => Models,
             ScreenKind.UserSettings => UserSettings,
             _ => Dashboard,
         };

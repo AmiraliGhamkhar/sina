@@ -113,6 +113,34 @@ class CloudLlmConfig(BaseModel):
     #: best-effort PHI scrub of transcript/context before ANY cloud provider
     #: sees it (privacy_required encounters never route cloud anyway)
     redact_phi_for_cloud: bool = True
+    # -- NER-based PHI redaction (openmed-persian-pii-tookabert, onnxruntime) --
+    #: directory containing model.onnx + tokenizer.json + config.json; None →
+    #: auto-resolved from MS_MODELS__DIR/persian-pii-tookabert once downloaded
+    pii_model_dir: str | None = None
+    pii_ner_enabled: bool = True
+    #: which PII label groups get masked pre-cloud. Labels kept OFF by default
+    #: are clinically central (AGE, DATE, SEX/GENDER, TITLE, CITY) — override
+    #: for stricter deployments. Full set: GIVENNAME SURNAME TITLE GENDER SEX
+    #: AGE DATE EMAIL TELEPHONENUM CITY STREET BUILDINGNUM ZIPCODE IDCARDNUM
+    #: SOCIALNUM TAXNUM PASSPORTNUM DRIVERLICENSENUM CREDITCARDNUMBER
+    pii_redact_labels: list[str] = [
+        "GIVENNAME",
+        "SURNAME",
+        "EMAIL",
+        "TELEPHONENUM",
+        "STREET",
+        "BUILDINGNUM",
+        "ZIPCODE",
+        "IDCARDNUM",
+        "SOCIALNUM",
+        "TAXNUM",
+        "PASSPORTNUM",
+        "DRIVERLICENSENUM",
+        "CREDITCARDNUMBER",
+    ]
+    #: sliding-window inference (model card: max_length 256/512, stride 96)
+    pii_max_length: int = 256
+    pii_stride: int = 96
 
 
 class LlmConfig(BaseModel):
@@ -157,6 +185,44 @@ class QwenAsrConfig(BaseModel):
     max_segment_ms: int = 20000
 
 
+class ShenavaConfig(BaseModel):
+    """In-process Shenava Koochik Persian STT (sherpa-onnx, `local-ai` extra).
+
+    Paths default to auto-resolution from the model manager's download folder
+    (MS_MODELS__DIR/shenava-koochik) — set explicitly to use a custom file
+    (e.g. the int4 graph or a sherpa-onnx repackaged archive).
+    """
+
+    model_path: str | None = None
+    tokens_path: str | None = None
+    num_threads: int = 2
+    latency_hint_ms: int = 600
+    # shared VadSegmenter semantics (ai/stt/_common.py)
+    vad_silence_ms: int = 600
+    vad_interim_ms: int = 1200
+    vad_pre_roll_ms: int = 300
+    vad_threshold: float = 0.02
+    max_segment_ms: int = 30000
+
+
+class ModelsConfig(BaseModel):
+    """Model hub: where downloaded model artifacts live + download policy.
+
+    Files land under {dir}/{catalog_id}/… — never committed, never served raw.
+    """
+
+    #: base directory for model artifacts (relative to CWD or absolute)
+    dir: str = "models"
+    #: HuggingFace base URL (override for mirrors in restricted networks)
+    base_url: str = "https://huggingface.co"
+    download_timeout_s: float = 1800.0
+    #: verify sha256 of downloaded files against the catalog (LFS files only;
+    #: non-LFS files are verified by exact size)
+    verify_sha256: bool = True
+    #: minimum free disk space required before starting a download
+    min_free_disk_bytes: int = 2 * 1024 * 1024 * 1024
+
+
 class SpeechmaticsConfig(BaseModel):
     api_key: SecretStr | None = None
     region: str = "eu2"  # eu2 | us
@@ -188,6 +254,7 @@ class SttConfig(BaseModel):
     mock_interim_delay_s: float = 0.05
     whisper_server: WhisperServerConfig = Field(default_factory=WhisperServerConfig)
     qwen_asr: QwenAsrConfig = Field(default_factory=QwenAsrConfig)
+    shenava: ShenavaConfig = Field(default_factory=ShenavaConfig)
     speechmatics: SpeechmaticsConfig = Field(default_factory=SpeechmaticsConfig)
     deepgram: DeepgramConfig = Field(default_factory=DeepgramConfig)
     #: batch transcribe upload cap in bytes (413 beyond this)
@@ -246,6 +313,7 @@ class Settings(BaseSettings):
     rate_limit: RateLimitConfig = Field(default_factory=RateLimitConfig)
     llm: LlmConfig = Field(default_factory=LlmConfig)
     stt: SttConfig = Field(default_factory=SttConfig)
+    models: ModelsConfig = Field(default_factory=ModelsConfig)
     routing: RoutingConfig = Field(default_factory=RoutingConfig)
     websocket: WebsocketConfig = Field(default_factory=WebsocketConfig)
     audit: AuditConfig = Field(default_factory=AuditConfig)
@@ -342,6 +410,24 @@ class Settings(BaseSettings):
                 "vad_pre_roll_ms": q.vad_pre_roll_ms,
                 "vad_threshold": q.vad_threshold,
                 "max_segment_ms": q.max_segment_ms,
+            }
+        if kind == "stt" and name == "shenava":
+            from ai.stt.shenava import resolve_shenava_paths
+
+            sh = self.stt.shenava
+            model_path, tokens_path = resolve_shenava_paths(
+                sh.model_path, sh.tokens_path, self.models.dir
+            )
+            return {
+                "model_path": model_path,
+                "tokens_path": tokens_path,
+                "num_threads": sh.num_threads,
+                "latency_hint_ms": sh.latency_hint_ms,
+                "vad_silence_ms": sh.vad_silence_ms,
+                "vad_interim_ms": sh.vad_interim_ms,
+                "vad_pre_roll_ms": sh.vad_pre_roll_ms,
+                "vad_threshold": sh.vad_threshold,
+                "max_segment_ms": sh.max_segment_ms,
             }
         if kind == "stt" and name == "speechmatics":
             sm = self.stt.speechmatics

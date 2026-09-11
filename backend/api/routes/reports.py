@@ -55,7 +55,6 @@ from api.services.note_prompt import (
     build_messages,
     parse_model_json,
     reconcile,
-    redact_phi,
     repair_messages,
     resolve_sections,
 )
@@ -230,13 +229,17 @@ async def create_draft(
         redact = is_cloud and settings_llm.cloud.redact_phi_for_cloud
 
         # prompt transcript: terminology-normalized view (canonical lexicon),
-        # then PHI redaction for cloud candidates
+        # then PHI redaction for cloud candidates (regex + NER model, see
+        # services/pii_ner.py — the privacy wall itself is unchanged)
+        redaction = app.state.redaction
         transcript = assembled["text"]
         if redact:
-            transcript = redact_phi(transcript)
+            transcript = await redaction.redact(transcript)
         patient_context = dict(raw_context) if raw_context else None
         if redact and patient_context:
-            patient_context = {k: redact_phi(str(v)) for k, v in patient_context.items()}
+            patient_context = {
+                k: await redaction.redact(str(v)) for k, v in patient_context.items()
+            }
         messages = build_messages(
             transcript=transcript,
             sections=sections,

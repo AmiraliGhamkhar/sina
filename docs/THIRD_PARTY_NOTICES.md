@@ -37,6 +37,29 @@ substantial the file header carries a pointer back here.
 - `ai/llm/openai_compat.py` unified OpenAI-compat client + SSE (Phlox
   `llm_client`, extended with retries).
 
+## Downloaded AI models (Model hub — see docs/MODELS.md)
+
+Model weights are **not** vendored in this repository; they are downloaded at
+runtime from the pinned HuggingFace sources below (sha256-pinned in
+`backend/api/services/model_catalog.py`). Deployments must honor each
+model's license:
+
+| Model (catalog id) | Source repo | License | Notes |
+|---|---|---|---|
+| Whisper large-v3-turbo Q4_0 (`whisper-large-v3-turbo`) | `Xviers/whisper-large-v3-turbo-GGUF` | MIT | quantized GGUF conversion of OpenAI Whisper large-v3-turbo (OpenAI Whisper is MIT) |
+| Shenava Koochik v1.0 (`shenava-koochik`) | `Reza2kn/Shenava-Koochik-v1.0-tract-streaming` | Apache-2.0 | the `mah92/sherpa-onnx-nemo-ctc-fa-shenava-koochik-…` repackaging is CC-BY-NC-4.0 and deliberately NOT used |
+| MiniCPM5 2B Q4_K_M (`minicpm5-2b`) | `openbmb/MiniCPM5-2B-GGUF` | Apache-2.0 | OpenBMB MiniCPM5 |
+| Jibay 2 Q4_K_M (`jibay-2`) | `JibayAi/Jibay_2_GGUF_Q4-K-M` | Apache-2.0 | JibayAi |
+| OpenMed Persian PII TookaBERT-Large INT4 (`persian-pii-tookabert`) | `Reza2kn/openmed-persian-pii-tookabert-large-onnx-int4` | CC-BY-4.0 | attribution required; derived from TookaBERT (Apache-2.0) |
+
+## Local AI runtime dependencies (`local-ai` extra)
+
+| Package | License | Use |
+|---|---|---|
+| sherpa-onnx | Apache-2.0 | in-process Shenava STT (NeMo FastConformer CTC streaming) |
+| onnxruntime | MIT | in-process PII NER inference (INT4 quantized graphs on CPU) |
+| tokenizers | Apache-2.0 | NER tokenization (Rust tokenizers, Python bindings) |
+
 ## License texts (required attribution)
 
 ### MIT License (applies to all four references above)

@@ -132,6 +132,21 @@ After eviction/restart `GET` serves the same REST shape from durable rows.
 
 These expose what the WS stream finalized; interim frames are never stored.
 
+## Models (model hub — verified downloads + auto-configure)
+
+| Method | Path | Auth | Notes |
+|---|---|---|---|
+| GET | `/api/v1/models` | any principal | server-driven catalog + live install status: `{models: [{id, name, role, description, license, license_url, source_repo, runtime, providers[], state (not_installed\|downloading\|installed\|error), progress, received_bytes, total_bytes, current_file, error, installed_at, auto_configured, operator_note, install_dir, files[{local_name, size_bytes, received_bytes}]}]}`. |
+| GET | `/api/v1/models/{id}` | any principal | single model, same shape (progress polling). 404 `NOT_FOUND` for unknown ids. |
+| POST | `/api/v1/models/{id}/download` | admin | start a verified background download → `202 {model_id, state, detail}`. 409 when one is already running (idempotent no-op `202 state=installed` when already installed), 503 on unreachable upstream. |
+| DELETE | `/api/v1/models/{id}` | admin | remove artifacts + cancel in-flight download → `{model_id, deleted, detail}`; idempotent. |
+
+Downloads stream from the pinned HuggingFace sources into `MS_MODELS__DIR`
+with sha256/size verification; in-process models (shenava STT, PII NER)
+auto-configure on completion. Audited metadata-only
+(`MODEL_DOWNLOADED`/`MODEL_DELETED`); metrics counters on `/metrics`. See
+`docs/MODELS.md` for the catalog, licenses, and external-service wiring.
+
 ## Planned (contract frozen in phase docs)
 
 - ~~`POST /api/v1/patients/search`, `POST /api/v1/encounters`~~ — shipped in P7 (see Patients & encounters)

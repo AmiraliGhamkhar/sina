@@ -1,6 +1,7 @@
 # MedicalScribe — development stack.
-#   docker compose up                → api + postgres + redis (+ nginx gateway)
-#   docker compose --profile llm up  → + llama-server (external AI service, §12)
+#   docker compose up                 → api + postgres + redis (+ nginx gateway)
+#   docker compose --profile llm up   → + llama-server (external AI service, §12)
+#   docker compose --profile stt up   → + whisper.cpp server (external STT, §12)
 # Secrets come from .env — never bake them into images.
 name: medicalscribe
 
@@ -13,6 +14,11 @@ services:
     environment:
       MS_DATABASE__URL: postgresql+asyncpg://medicalscribe:medicalscribe@postgres:5432/medicalscribe
       MS_REDIS__URL: redis://redis:6379/0
+      MS_MODELS__DIR: /app/models
+    volumes:
+      # model hub downloads land here (shenava STT + PII NER run in-process);
+      # ensure the directory is writable by uid 10001 when using docker
+      - ./models:/app/models
     ports:
       - "127.0.0.1:8000:8000"          # dev binds loopback only; nginx fronts prod
     depends_on:
@@ -90,16 +96,34 @@ services:
 
   # llama-server is an EXTERNAL service (spec §12): MedicalScribe never embeds
   # llama.cpp; it talks to this HTTP endpoint over MS_LLM__LLAMA_SERVER__BASE_URL.
+  # MS_LLM_GGUF selects the downloaded model (Model hub catalog paths) — see
+  # docs/MODELS.md; defaults to the MiniCPM5-2B download.
   llama:
     image: ghcr.io/ggml-org/llama.cpp:server
     profiles: ["llm"]
     command: >
-      -m /models/model.gguf --host 0.0.0.0 --port 8080
+      -m /models/${MS_LLM_GGUF:-minicpm5-2b/MiniCPM5-2B-Q4_K_M.gguf}
+      --host 0.0.0.0 --port 8080
       --ctx-size 8192 --n-gpu-layers 99
     volumes:
       - ./models:/models:ro          # model files live outside the app image
     ports:
       - "127.0.0.1:8080:8080"
+    restart: unless-stopped
+
+  # whisper.cpp server is likewise EXTERNAL (spec §12): the API talks to it
+  # over MS_STT__WHISPER_SERVER__URL. Point it at the downloaded GGUF via
+  # MS_WHISPER_GGUF (Model hub path) — defaults to whisper large-v3-turbo q4_0.
+  whisper:
+    image: ghcr.io/ggml-org/whisper.cpp:main
+    profiles: ["stt"]
+    command: >
+      whisper-server --host 0.0.0.0 --port 9000
+      -m /models/${MS_WHISPER_GGUF:-whisper-large-v3-turbo/whisper-large-v3-turbo-q4_0.gguf}
+    volumes:
+      - ./models:/models:ro
+    ports:
+      - "127.0.0.1:9000:9000"
     restart: unless-stopped
 
 volumes:

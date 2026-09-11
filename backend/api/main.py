@@ -39,6 +39,8 @@ from api.services.audit import AuditLog
 from api.services.auth_service import AuthService
 from api.services.cost import CostLedger
 from api.services.health_mirror import HealthMirror
+from api.services.model_manager import ModelManager
+from api.services.pii_ner import RedactionService
 from api.services.rate_limit import InProcessBackend, RateLimiter, RateLimitExceeded, RedisBackend
 from api.services.report_store import ReportStore
 from api.services.secrets import SecretVault
@@ -121,6 +123,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             await app.state.ai_registry.aclose_all()
         except Exception:  # pragma: no cover - best effort shutdown
             logger.debug("provider shutdown cleanup failed", exc_info=True)
+        try:
+            await app.state.model_manager.aclose()
+        except Exception:  # pragma: no cover - best effort shutdown
+            logger.debug("model manager shutdown cleanup failed", exc_info=True)
         db = getattr(app.state, "db", None)
         if db is not None:
             try:
@@ -157,6 +163,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.transcript_store = TranscriptStore()
     app.state.terminology = TerminologyNormalizer()
     app.state.voice_commands = VoiceCommandService()
+    # NER-based pre-cloud PHI redaction (regex fallback built-in)
+    app.state.redaction = RedactionService(
+        settings.llm.cloud, settings.models, metrics=app.state.metrics
+    )
 
     # -- Phase 7 durable state (None-safe: in-memory mode keeps everything) --
     db = open_database(
@@ -226,6 +236,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.audit = AuditLog(
         Path(settings.audit.log_file) if settings.audit.enabled else None,
         enabled=settings.audit.enabled,
+    )
+    # -- model hub (verified downloads + auto-configure) ----------------------
+    app.state.model_manager = ModelManager(
+        settings.models, metrics=app.state.metrics, audit=app.state.audit
     )
 
     # -- middleware --------------------------------------------------------

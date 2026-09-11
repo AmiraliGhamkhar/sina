@@ -30,6 +30,8 @@ data/
 logs/
 storage/
 uploads/
+# Model hub downloads (MS_MODELS__DIR) — weights are never committed
+models/
 
 # IDE
 .vscode/

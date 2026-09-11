@@ -20,6 +20,7 @@
         <DataTemplate DataType="{x:Type vm:ReportViewModel}"><views:ReportView/></DataTemplate>
         <DataTemplate DataType="{x:Type vm:TemplatesViewModel}"><views:TemplatesView/></DataTemplate>
         <DataTemplate DataType="{x:Type vm:AiSettingsViewModel}"><views:AiSettingsView/></DataTemplate>
+        <DataTemplate DataType="{x:Type vm:ModelsViewModel}"><views:ModelsView/></DataTemplate>
         <DataTemplate DataType="{x:Type vm:UserSettingsViewModel}"><views:UserSettingsView/></DataTemplate>
     </Window.Resources>
 

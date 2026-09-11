@@ -7,10 +7,12 @@ providers. Generated notes are **drafts a clinician must review, edit, finalize
 and approve** — AI output is never automatically a medical record.
 
 ```
-WPF client ──HTTPS/WS──► FastAPI ──► AI Router ──► STT: whisper / qwen / speechmatics / deepgram / mock
+WPF client ──HTTPS/WS──► FastAPI ──► AI Router ──► STT: whisper / shenava (in-proc) / qwen / speechmatics / deepgram / mock
  (no provider access,          │                └► LLM: llama-server / openai / anthropic / gemini / mock
   no secrets here)             ├─ PostgreSQL (system of record) · Redis (queues, limits, shared state)
                                └─ audit log + metrics (never raw transcripts by default)
+                                            ┌─ model hub: sha256-verified downloads, auto-configure
+                                            └─ (docs/MODELS.md — weights never touch the client)
 ```
 
 Everything below is written for **Windows 11 + PowerShell**. Linux/macOS notes
@@ -131,7 +133,13 @@ curl.exe http://localhost:8000/health
 
 ## 4. Run the desktop client (WPF)
 
-With the backend still running, open a second PowerShell window:
+**Easiest:** download `MedicalScribe-win-x64.zip` from the latest
+[GitHub Release](../../releases) (built by CI on every `v*` tag) — it's a
+self-contained single-file exe, no .NET install needed. Unzip and run
+`MedicalScribe.WPF.exe`.
+
+**From source**, with the backend still running, open a second PowerShell
+window:
 
 ```powershell
 cd sina\client
@@ -150,7 +158,7 @@ dotnet run --project MedicalScribe.WPF
 ## 5. Run the tests
 
 ```powershell
-python -m pytest                                        # 277 tests
+python -m pytest                                        # 321 tests
 python -m ruff check ai backend tests                   # lint
 ```
 
@@ -204,8 +212,17 @@ via `POST /api/v1/admin/users`.
 
 **Real AI providers** — all optional, all server-side:
 
+* **Model hub (recommended)**: in the client's **AI Models** screen, an admin
+  downloads local models (Persian Shenava STT, PII redaction NER, Whisper
+  turbo, MiniCPM5 / Jibay LLMs). The server downloads + sha256-verifies and
+  auto-configures in-process models; external services (whisper.cpp /
+  llama-server) get their exact start command, or just run
+  `docker compose --profile stt up` / `--profile llm up`. Details + licenses:
+  `docs/MODELS.md`.
 * Local speech: set `MS_STT__WHISPER_SERVER__URL` (whisper.cpp server) and
-  `MS_STT__DEFAULT_PROVIDER=whisper-local`.
+  `MS_STT__DEFAULT_PROVIDER=whisper-local`. Persian in-process STT:
+  `MS_STT__DEFAULT_PROVIDER=shenava` (needs `pip install ".[local-ai]"` +
+  the Shenava model downloaded from the AI Models screen).
 * Local LLM: run llama.cpp's server, set `MS_LLM__LLAMA_SERVER__BASE_URL`
   (e.g. `http://127.0.0.1:8080`), or use `docker compose --profile llm up`
   with a `.gguf` file in `models/`.
@@ -285,11 +302,13 @@ docker-compose.yml .env.example
 ## Docs & known gaps
 
 - `docs/ASSESSMENT.md` · `ARCHITECTURE.md` · `API.md` · `WEBSOCKET_PROTOCOL.md` ·
-  `DEPLOYMENT.md` · `SECURITY.md` · `RELEASE.md` · `ROADMAP.md` ·
+  `DEPLOYMENT.md` · `MODELS.md` · `SECURITY.md` · `RELEASE.md` · `ROADMAP.md` ·
   `SOURCE_MAP.md` · `THIRD_PARTY_NOTICES.md`
 - Honest caveats worth knowing before a pilot: the WPF app is compile-verified
-  in CI but still needs a human pass on a real Windows machine; cloud STT/LLM
-  adapters are verified against recorded fixtures, not live vendor accounts; the
-  20-session load number was measured against the mock STT provider; MSIX
-  packaging/signing is documented but not automated. `docs/ROADMAP.md` tracks
-  the rest.
+  in CI (and the self-contained exe is built there) but still needs a human
+  pass on a real Windows machine; cloud STT/LLM adapters are verified against
+  recorded fixtures, not live vendor accounts; the 20-session load number was
+  measured against the mock STT provider; model downloads are verified against
+  the pinned catalog but model *quality* (WER / F1) is taken from the
+  publishers' cards, not re-benchmarked here; MSIX packaging/signing is
+  documented but not automated. `docs/ROADMAP.md` tracks the rest.

@@ -42,6 +42,15 @@ security = [
     "argon2-cffi>=23.1",
     "cryptography>=42.0",
 ]
+# Model hub: in-process local AI runtimes (Shenava STT via sherpa-onnx,
+# PII NER redaction via onnxruntime + tokenizers). Optional — without it the
+# backend runs fine with the HTTP-based providers and regex redaction.
+local-ai = [
+    "sherpa-onnx>=1.13.5",  # from_nemo_ctc streaming support (shenava)
+    "onnxruntime>=1.17",    # MatMulNBits int4 (PII model)
+    "tokenizers>=0.20",     # tokenizer.json without the transformers stack
+    "numpy>=1.26",
+]
 # Phase 8 — optional OTel tracing (metrics-only without it)
 observability = [
     "opentelemetry-sdk>=1.24",

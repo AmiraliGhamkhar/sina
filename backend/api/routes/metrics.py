@@ -10,6 +10,7 @@ Mapping rules (stable, documented for dashboards):
 - counter ``llm_errors:<attempt>``    → ``medicalscribe_llm_errors_total{attempt}``
 - counter ``llm_tokens:<p>:<field>``  → ``medicalscribe_llm_tokens_total{provider,field}``
 - counter ``voice_command:<id>``      → ``medicalscribe_voice_commands_total{command}``
+- counter ``model_downloads:<id>:<status>`` → ``medicalscribe_model_downloads_total{model,status}``
 - other counters                      → ``medicalscribe_<sanitized>_total``
 - latency ``http.<route template>``   → ``medicalscribe_http_request_duration_seconds``
                                         summary{route} (quantiles from the
@@ -61,6 +62,14 @@ def _counter_series(name: str) -> tuple[str, dict[str, str]] | None:
         return None
     if name.startswith("voice_command:"):
         return "medicalscribe_voice_commands_total", {"command": name.split(":", 1)[1]}
+    if name.startswith("model_downloads:"):
+        parts = name.split(":")
+        if len(parts) == 3:
+            return "medicalscribe_model_downloads_total", {
+                "model": parts[1],
+                "status": parts[2],
+            }
+        return None
     return None
 
 
