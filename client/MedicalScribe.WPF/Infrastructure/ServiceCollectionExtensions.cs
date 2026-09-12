@@ -27,6 +27,13 @@ public static class ServiceCollectionExtensions
         var settingsStore = new JsonSettingsStore();
         settingsStore.Load();
 
+        // Both registrations point at the SAME instance. The interface
+        // registration is load-bearing: DictationSession, Ai-/UserSettingsViewModel
+        // and MainViewModel all take ISettingsStore — asking for it was never
+        // registered, so GetRequiredService<MainViewModel>() used to throw
+        // "Unable to resolve service for type ...ISettingsStore" and the app
+        // died before its first window (caught by ServiceCompositionTests).
+        services.AddSingleton<ISettingsStore>(settingsStore);
         services.AddSingleton(settingsStore);
         services.AddSingleton(settingsStore.Current);
         services.AddSingleton<ILoggerService, FileLogger>();
