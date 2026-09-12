@@ -348,7 +348,9 @@ protocol. Explicit client-side configuration, not discovery alone.
   *server* actually chose; AI Settings gained an STT-provider picker
   (configured + streaming providers only, a saved-but-unavailable preference
   falls back with a warning and is left intact rather than silently
-  overwritten) and a **9Router** card that lists the live LLM/STT catalogs.
+  overwritten) and a **9Router** card that lists the live LLM/STT catalogs. The
+  discover command is gated *inside the method* as well as via `CanExecute`
+  (see ledger).
   `GetProviderModelsAsync` on `IApiClient`/`ApiClient`; DTOs in
   `ServerModels.cs`.
 - Tests: `tests/test_nine_router.py`, rewritten `tests/test_stt_speechmatics.py`
@@ -371,7 +373,19 @@ protocol. Explicit client-side configuration, not discovery alone.
     (`client-linux` compile gate + `client-windows` build/xunit) is the
     authority on these C#/XAML changes. They were reviewed and cross-checked
     by hand (interface-member parity, XAML well-formedness, every `{Binding}`
-    root resolving to a ViewModel member) but not built locally.
+    root resolving to a ViewModel member) but not built locally — and CI
+    promptly earned that caveat: the first Windows run came back **73/74**
+    with one real failure.
+  - **The failure CI caught:** `AsyncRelayCommand.ExecuteAsync` does *not*
+    re-check `CanExecute` — only the `ICommand.Execute` entry point does — so
+    the `CanExecute` gate on 9Router model discovery was bypassed when the
+    command was invoked programmatically, and an unconfigured router produced
+    the misleading "no upstream accounts are connected" note instead of
+    staying silent. The gate now lives inside `DiscoverNineRouterModelsAsync`
+    too, and the test invokes `ExecuteAsync` deliberately to pin that path.
+    Swept the other seven `CanExecute`-gated commands in the client
+    (Recorder, Login, LiveTranscript): all are reached through
+    `ICommand.Execute`, so none shares the bug.
   - 9Router's STT `list_models()` requires the per-kind route
     `GET /api/v1/models/stt`. There is **no** fallback that filters
     `/api/v1/models` — a build without that route yields a loud `ProviderError`

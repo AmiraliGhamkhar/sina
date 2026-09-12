@@ -226,12 +226,23 @@ public sealed partial class AiSettingsViewModel : ObservableObject
     }
 
     /// <summary>Fetch both 9Router catalogs. Advisory: a failure explains itself
-    /// in <see cref="ModelDiscoveryError"/> and never blocks the screen. Gated on
-    /// <see cref="CanDiscoverNineRouterModels"/> so an unconfigured router cannot
-    /// be probed into a misleading "no upstreams connected" message.</summary>
+    /// in <see cref="ModelDiscoveryError"/> and never blocks the screen.</summary>
+    /// <remarks>Gated on <see cref="CanDiscoverNineRouterModels"/> *inside* the
+    /// method as well as via <c>CanExecute</c>: CommunityToolkit's
+    /// <c>AsyncRelayCommand.ExecuteAsync</c> does not re-check <c>CanExecute</c>
+    /// (only the <c>ICommand.Execute</c> entry point does), so a programmatic
+    /// invocation would otherwise probe an unconfigured router and report the
+    /// misleading "no upstream accounts are connected" instead of "not
+    /// configured". The button is disabled either way; this keeps the two paths
+    /// honest.</remarks>
     [RelayCommand(CanExecute = nameof(CanDiscoverNineRouterModels))]
     private async Task DiscoverNineRouterModelsAsync()
     {
+        if (!CanDiscoverNineRouterModels)
+        {
+            return;
+        }
+
         IsDiscoveringModels = true;
         ModelDiscoveryError = null;
         ModelDiscoveryNote = null;

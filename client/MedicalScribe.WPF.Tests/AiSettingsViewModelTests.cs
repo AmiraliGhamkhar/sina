@@ -271,13 +271,17 @@ public sealed class AiSettingsViewModelTests : IDisposable
         Assert.False(vm.CanDiscoverNineRouterModels);
         Assert.Contains("not configured", vm.NineRouterStatusSummary);
 
-        // the command is gated, so invoking it is a no-op rather than a probe
-        // that would report a misleading "no upstream accounts connected"
+        // The command is gated two ways. Invoke it through ExecuteAsync — the
+        // path that bypasses ICommand.Execute's CanExecute check — to prove the
+        // method guards itself: probing an unconfigured router would report a
+        // misleading "no upstream accounts are connected" rather than the
+        // actionable "not configured" a 409 would carry.
         Assert.False(vm.DiscoverNineRouterModelsCommand.CanExecute(null));
         await vm.DiscoverNineRouterModelsCommand.ExecuteAsync(null);
         Assert.Empty(api.ModelCalls);
         Assert.Empty(vm.NineRouterLlmModels);
         Assert.Empty(vm.NineRouterSttModels);
+        Assert.False(vm.IsDiscoveringModels);
         Assert.Null(vm.ModelDiscoveryError);
         Assert.Null(vm.ModelDiscoveryNote);
     }
