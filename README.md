@@ -158,7 +158,7 @@ dotnet run --project MedicalScribe.WPF
 ## 5. Run the tests
 
 ```powershell
-python -m pytest                                        # 321 tests
+python -m pytest                                        # 402 collected (backend + AI layer)
 python -m ruff check ai backend tests                   # lint
 ```
 
@@ -173,7 +173,9 @@ Easiest path to a full stack (API + Postgres + Redis) — no Python install need
 ```powershell
 Copy-Item .env.example .env      # edit MS_AUTH__JWT_SECRET like in step 3c
 docker compose up --build        # add: --profile monitoring  for Prometheus + Grafana
-                                 # add: --profile llm         for a local llama-server (needs models\model.gguf)
+                                 # add: --profile llm         for a local llama-server (GGUF named by
+                                 #                            MS_LLM_GGUF under models/ — download from the
+                                 #                            client's AI Models screen; see docs/MODELS.md)
 ```
 
 The API is then on <http://localhost:8000> — `docker compose logs -f api` to
@@ -192,6 +194,8 @@ watch it, `docker compose down` to stop.
 | `error: Microsoft Visual C++ 14.0 or greater is required` during `pip install` | Use 64-bit Python 3.12+, where all dependencies ship prebuilt wheels; or just use Docker (section 6) |
 | `dotnet : The term 'dotnet' is not recognized` | Install the .NET 10 SDK, then reopen PowerShell |
 | WPF window never connects | Backend must be running and the client's Server URL must match (`http://localhost:8000`) |
+| The exe starts but **no window appears** (or it closes right after the first-run wizard) | Fixed in the client: closing the pre-main-window wizard used to trigger WPF's default `OnLastWindowClose` shutdown and tear down the app. Rebuild/update the client. If it still fails, the app now shows a message box with the exact error instead of dying silently — details are also in `%LOCALAPPDATA%\MedicalScribe\logs\client.log` |
+| `uvicorn` (or `docker compose`) shows only a console with log lines — no GUI | Expected: that's the **backend server**, it has no GUI. The GUI is the WPF client: run `MedicalScribe.WPF.exe` (section 4) while the backend keeps running |
 | Firewall prompt on first run | Allow on private networks, or keep the API bound to `127.0.0.1` |
 
 ## 8. Next steps (optional)
