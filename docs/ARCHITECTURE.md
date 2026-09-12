@@ -71,17 +71,42 @@ clinical documentation platform.
 **Registry membership** (one register + one module each). STT — all shipped:
 `whisper-local` (whisper-server HTTP + VAD-windowed pseudo-stream, pattern
 noted in docs/ASSESSMENT.md §2), `qwen-asr` (OpenAI-audio-compatible service),
-`speechmatics` (WS + batch job API, fa configured), `deepgram` (WS +
-prerecorded, keyword boost for drug names/laterality words). Cloud WS traffic
+`shenava` (in-process Persian ASR, `local-ai` extra),
+`speechmatics` (realtime WS v2 + batch job API, fa configured), `deepgram` (WS +
+prerecorded, keyword boost for drug names/laterality words) and
+`9router` (Whisper-compatible `POST /api/v1/audio/transcriptions` against a
+self-hosted proxy, pseudo-streamed through `VadSegmenter`). Cloud WS traffic
 goes through the `ai/stt/ws_transport.WsTransport` seam — tests run the exact
 protocol against scripted transports (zero network). LLM — `llama-server`
 (shipped + `/props` capability discovery, §12 external-service rule), and
 Phase 4 shipped `openai` (shared openai-compat transport), `anthropic`
 (native Messages wire) and `gemini` (generateContent + SSE) — httpx only, no
-SDKs, usage metered into the shared counters. PHI scrub
+SDKs, usage metered into the shared counters. Phase 9 added `9router`
+(OpenAI-compatible + Anthropic `messages` wire, shared plumbing in
+`ai/nine_router_client.py`). PHI scrub
 (`llm.cloud.redact_phi_for_cloud`) guards every cloud prompt; the privacy
 wall remains the actual guarantee. The two mocks keep the full pipeline
 CI-testable without keys.
+
+**9Router privacy class.** A 9Router instance normally listens on
+`127.0.0.1:20128` on the operator's own machine, so both adapters classify it
+`PrivacyClass.LOCAL` by default and it is eligible for `privacy_required`
+encounters. `privacy_class: cloud` in config is an explicit opt-out for a
+deployment that relays to cloud accounts; an unrecognised value logs a warning
+and falls back to LOCAL (fail-safe, never fail-open).
+
+**Dynamic catalogs.** `ProviderDescriptor.supports_model_discovery` marks
+providers whose model list is not known at build time (9Router fronting 40+
+upstreams). `GET /api/v1/providers/{name}/models?kind=llm|stt` calls the
+adapter's `list_models()` under a 15 s timeout and returns `ProviderModelInfo`
+rows — `id`, `owned_by`, `context_length`, `max_completion_tokens`, router
+capability flags — plus `configured_model`, the id the server is currently set
+to use. A model id is not a secret; nothing else from config is ever echoed.
+It fails loudly instead of returning a blank list: `501` when the provider has
+no catalog at all, `409` when the provider exists but is not configured
+server-side (naming the env var to set), `502`/`504` when the upstream is
+unreachable or slow. A descriptor that advertises discovery while its adapter
+lacks `list_models()` is reported as `501` too — our bug, not the operator's.
 
 ## 4. AI routing (`ai/router`)
 

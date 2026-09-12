@@ -62,7 +62,8 @@ DB-backed clinical entities; without `MS_DATABASE__URL` these answer
 
 | Method | Path | Auth | Notes |
 |---|---|---|---|
-| GET | `/api/v1/providers?kind=stt|llm&probe=health` | optional | registry listing: `{name, kind, description, configured, capabilities{privacy_class,...}, health?}` |
+| GET | `/api/v1/providers?kind=stt|llm&probe=health` | optional | registry listing: `{name, kind, description, configured, supports_model_discovery, capabilities{privacy_class,...}, health?}` |
+| GET | `/api/v1/providers/{name}/models?kind=llm\|stt` | optional | **live model catalog** for providers advertising `supports_model_discovery` (9Router today — its `provider/model` ids depend on which upstream accounts the operator connected): `{provider, kind, configured_model, models[{id, kind, owned_by, context_length, max_completion_tokens, capabilities}]}`. A model id is not a secret; nothing else from config is ever echoed. Fails loudly rather than returning a blank dropdown — `404` unknown provider, `501` provider has no catalog, `409` not configured server-side (message names the env var to set), `502` upstream unreachable or bad key, `504` catalog timed out (15 s) |
 | GET | `/api/v1/observability/stats` | optional | process metrics snapshot — counters/gauges/latency plus **Phase 5**: `provider_health` (HealthTracker snapshot incl. EWMA latency + demotion state) and `cost` (daily token budget ledger). Prometheus endpoint: P8 |
 
 ## Reports (draft generation Phase 4 · lifecycle Phase 6)

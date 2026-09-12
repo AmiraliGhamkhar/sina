@@ -74,6 +74,8 @@ public sealed class FakeModelApiClient : IApiClient
     public Task<ClientManifestDto?> GetManifestAsync(CancellationToken ct = default) => Task.FromResult<ClientManifestDto?>(null);
     public Task<IReadOnlyList<ProviderInfoDto>> GetProvidersAsync(bool probeHealth = false, CancellationToken ct = default) =>
         Task.FromResult<IReadOnlyList<ProviderInfoDto>>(new List<ProviderInfoDto>());
+    public Task<ProviderModelCatalogDto?> GetProviderModelsAsync(string provider, string kind = "llm", CancellationToken ct = default) =>
+        Task.FromResult<ProviderModelCatalogDto?>(null);
     public Task<TokenPairDto> LoginAsync(LoginRequestDto request, CancellationToken ct = default) => throw new NotSupportedException();
     public Task<TokenPairDto> RefreshAsync(string refreshToken, CancellationToken ct = default) => throw new NotSupportedException();
     public Task LogoutAsync(CancellationToken ct = default) => Task.CompletedTask;

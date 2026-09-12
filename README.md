@@ -7,8 +7,8 @@ providers. Generated notes are **drafts a clinician must review, edit, finalize
 and approve** — AI output is never automatically a medical record.
 
 ```
-WPF client ──HTTPS/WS──► FastAPI ──► AI Router ──► STT: whisper / shenava (in-proc) / qwen / speechmatics / deepgram / mock
- (no provider access,          │                └► LLM: llama-server / openai / anthropic / gemini / mock
+WPF client ──HTTPS/WS──► FastAPI ──► AI Router ──► STT: whisper / shenava (in-proc) / qwen / speechmatics / deepgram / 9router / mock
+ (no provider access,          │                └► LLM: llama-server / openai / anthropic / gemini / 9router / mock
   no secrets here)             ├─ PostgreSQL (system of record) · Redis (queues, limits, shared state)
                                └─ audit log + metrics (never raw transcripts by default)
                                             ┌─ model hub: sha256-verified downloads, auto-configure
@@ -226,6 +226,18 @@ via `POST /api/v1/admin/users`.
 * Local LLM: run llama.cpp's server, set `MS_LLM__LLAMA_SERVER__BASE_URL`
   (e.g. `http://127.0.0.1:8080`), or use `docker compose --profile llm up`
   with a `.gguf` file in `models/`.
+* **9Router** — one local endpoint that fronts many upstream models
+  ([decolua/9router](https://github.com/decolua/9router), MIT). Start it
+  (default `http://127.0.0.1:20128`) and point either adapter at it:
+  `MS_LLM__NINE_ROUTER__BASE_URL` for chat models,
+  `MS_STT__NINE_ROUTER__BASE_URL` for Whisper-compatible transcription.
+  Add `__API_KEY` **only** if you launched it with `REQUIRE_API_KEY=true`.
+  A 9Router box normally sits on your own machine, so both adapters default
+  to `LOCAL` and stay eligible under `privacy_required` — flip
+  `__PRIVACY_CLASS=cloud` only for an instance relaying to cloud accounts.
+  The model list it is currently serving is browsable from the client's
+  **AI Settings → 9Router** card
+  (`GET /api/v1/providers/9router/models?kind=llm|stt`).
 * Cloud STT/LLM: put API keys in `MS_STT__DEEPGRAM__API_KEY`,
   `MS_LLM__CLOUD__OPENAI_API_KEY`, … — or store them encrypted through the
   admin API. Check what's live with
@@ -280,6 +292,7 @@ docker-compose.yml .env.example
 | 6 | Voice commands, bilingual terminology, templates, report lifecycle (draft→finalized→approved), full clinical validation | ✅ |
 | 7 | PostgreSQL + Alembic (14 tables), JWT + refresh rotation, argon2 login + lockout, rate limiting, encrypted provider secrets, audit + admin API | ✅ |
 | 8 | Prometheus `/metrics`, Grafana dashboard, WS heartbeat, CI on real Postgres/Redis, load-test harness, first-run wizard, MSIX templates | ✅ |
+| 9 | Provider expansion: **9Router** adapters (LLM + STT, LOCAL by default), Speechmatics realtime WS re-aligned to the current v2 protocol, `GET /providers/{name}/models` live catalog discovery, client STT-provider picker + 9Router model browser | ✅ |
 
 ## Non-negotiables encoded in this codebase
 

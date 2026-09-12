@@ -4,18 +4,111 @@
     <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="24">
         <StackPanel MaxWidth="900">
             <Grid>
-                <TextBlock Text="AI settings (read-only)" Style="{StaticResource SectionTitle}"/>
+                <TextBlock Text="AI settings" Style="{StaticResource SectionTitle}"/>
                 <Button Content="Probe providers" Style="{StaticResource SecondaryButton}" HorizontalAlignment="Right" VerticalAlignment="Top"
                         Command="{Binding RefreshCommand}"/>
             </Grid>
-            <TextBlock Margin="0,0,0,12" Foreground="{StaticResource MutedInk}"
-                       Text="Provider credentials and model configuration live exclusively on the server. This screen shows what the API exposes; changes to secrets must be made server-side (docs/DEPLOYMENT.md)."/>
+            <TextBlock Margin="0,0,0,12" Foreground="{StaticResource MutedInk}" TextWrapping="Wrap"
+                       Text="Provider credentials and model configuration live exclusively on the server. This screen shows what the API exposes and lets you make two request-level choices — the routing mode and an optional pinned STT provider. The server's privacy policy still overrides both; changes to secrets must be made server-side (docs/DEPLOYMENT.md)."/>
 
             <Border Style="{StaticResource Card}" Margin="0,0,0,12">
                 <StackPanel>
                     <TextBlock Text="Routing mode (request-level policy)" FontWeight="SemiBold" Margin="0,0,0,6"/>
                     <ComboBox ItemsSource="{Binding RoutingModes}" SelectedItem="{Binding RoutingMode}" Width="180" HorizontalAlignment="Left"/>
-                    <TextBlock Text="{Binding PrivacyNote}" Foreground="#92400E" Margin="0,8,0,0" FontSize="12.5"/>
+                    <TextBlock Text="{Binding PrivacyNote}" Foreground="#92400E" Margin="0,8,0,0" FontSize="12.5" TextWrapping="Wrap"/>
+                </StackPanel>
+            </Border>
+
+            <!-- Pinning a provider is a request: session.start carries it and the
+                 server may still substitute a local engine for private encounters. -->
+            <Border Style="{StaticResource Card}" Margin="0,0,0,12">
+                <StackPanel>
+                    <TextBlock Text="Dictation STT provider" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                    <ComboBox ItemsSource="{Binding SttProviderChoices}"
+                              SelectedItem="{Binding SelectedSttProvider}"
+                              MinWidth="320" HorizontalAlignment="Left"/>
+                    <TextBlock Text="{Binding PreferredProviderNote}" Foreground="{StaticResource MutedInk}"
+                               Margin="0,8,0,0" FontSize="12.5" TextWrapping="Wrap"/>
+                    <TextBlock Foreground="#92400E" Margin="0,6,0,0" FontSize="12.5" TextWrapping="Wrap"
+                               Visibility="{Binding UnavailableSttProviderNote, Converter={StaticResource NullToCollapsed}}"
+                               Text="{Binding UnavailableSttProviderNote}"/>
+                    <TextBlock Foreground="{StaticResource MutedInk}" Margin="0,6,0,0" FontSize="11.5" TextWrapping="Wrap"
+                               Text="Only providers the server reports as configured and streaming-capable are listed."/>
+                </StackPanel>
+            </Border>
+
+            <!-- 9Router: one self-hosted proxy fronting 40+ upstreams. Its model
+                 ids are "provider/model" and depend on which accounts the
+                 operator connected, so the catalog is discovered, not hardcoded. -->
+            <Border Style="{StaticResource Card}" Margin="0,0,0,12"
+                    Visibility="{Binding HasNineRouter, Converter={StaticResource BoolToVis}}">
+                <StackPanel>
+                    <Grid Margin="0,0,0,6">
+                        <TextBlock Text="9Router — multi-provider proxy" FontWeight="SemiBold"/>
+                        <Button Content="Discover models" Style="{StaticResource SecondaryButton}"
+                                HorizontalAlignment="Right"
+                                Command="{Binding DiscoverNineRouterModelsCommand}"/>
+                    </Grid>
+                    <TextBlock Text="{Binding NineRouterStatusSummary}" Foreground="{StaticResource MutedInk}"
+                               FontSize="12.5" Margin="0,0,0,8" TextWrapping="Wrap"/>
+
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+                        <TextBlock Text="Server LLM model:" FontSize="12.5" Foreground="{StaticResource MutedInk}" Margin="0,0,8,2"/>
+                        <TextBlock Grid.Column="1" Text="{Binding NineRouterLlmModel, TargetNullValue='not set'}"
+                                   FontSize="12.5" FontFamily="Consolas" Margin="0,0,0,2"/>
+                        <TextBlock Grid.Row="1" Text="Server STT model:" FontSize="12.5" Foreground="{StaticResource MutedInk}" Margin="0,0,8,0"/>
+                        <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding NineRouterSttModel, TargetNullValue='not set'}"
+                                   FontSize="12.5" FontFamily="Consolas"/>
+                    </Grid>
+
+                    <TextBlock Text="{Binding ModelDiscoveryNote}" Foreground="{StaticResource MutedInk}" FontSize="12"
+                               TextWrapping="Wrap" Margin="0,0,0,6"
+                               Visibility="{Binding ModelDiscoveryNote, Converter={StaticResource NullToCollapsed}}"/>
+                    <TextBlock Text="{Binding ModelDiscoveryError}" Foreground="{StaticResource Danger}" FontSize="12"
+                               TextWrapping="Wrap" Margin="0,0,0,6"
+                               Visibility="{Binding ModelDiscoveryError, Converter={StaticResource NullToCollapsed}}"/>
+                    <TextBlock Text="Loading catalog…" Foreground="{StaticResource MutedInk}" FontSize="12"
+                               Visibility="{Binding IsDiscoveringModels, Converter={StaticResource BoolToVis}}"/>
+
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="16"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <TextBlock Text="LLM models (chat / note drafting)" FontSize="12" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                            <ScrollViewer VerticalScrollBarVisibility="Auto" MaxHeight="220">
+                                <ItemsControl ItemsSource="{Binding NineRouterLlmModels}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding Display}" FontSize="12" FontFamily="Consolas" Padding="0,1"/>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </ScrollViewer>
+                        </StackPanel>
+                        <StackPanel Grid.Column="2">
+                            <TextBlock Text="STT models (transcription)" FontSize="12" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                            <ScrollViewer VerticalScrollBarVisibility="Auto" MaxHeight="220">
+                                <ItemsControl ItemsSource="{Binding NineRouterSttModels}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding Display}" FontSize="12" FontFamily="Consolas" Padding="0,1"/>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </ScrollViewer>
+                        </StackPanel>
+                    </Grid>
                 </StackPanel>
             </Border>
 
@@ -38,7 +131,8 @@
                                             <TextBlock Text="{Binding Kind}" FontSize="11" Foreground="{StaticResource MutedInk}"/>
                                         </StackPanel>
                                         <TextBlock Grid.Column="1" Text="{Binding Capabilities.PrivacyClass}" VerticalAlignment="Center" FontSize="12"/>
-                                        <TextBlock Grid.Column="2" Text="{Binding Description}" Foreground="{StaticResource MutedInk}" FontSize="12" VerticalAlignment="Center" Margin="12,0"/>
+                                        <TextBlock Grid.Column="2" Text="{Binding Description}" Foreground="{StaticResource MutedInk}" FontSize="12"
+                                                   VerticalAlignment="Center" Margin="12,0" TextWrapping="Wrap"/>
                                         <TextBlock Grid.Column="3" VerticalAlignment="Center" HorizontalAlignment="Right" FontSize="12"
                                                    Foreground="{StaticResource MutedInk}"
                                                    Text="{Binding Configured, StringFormat='configured: {0}'}"/>

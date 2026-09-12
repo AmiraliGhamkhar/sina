@@ -96,9 +96,14 @@ public sealed class DictationSession : IDisposable
         }
         _finalCount = 0;
         _ui.Post(() => _sink.SetStatusNote("connecting transcription stream…"));
+        // An explicit provider is a *request*, not an override: the server's
+        // privacy policy still wins and may substitute a local provider. The
+        // frame that comes back names whatever was actually selected.
+        var preferredProvider = settings.PreferredSttProvider?.Trim();
         var started = await _stream.StartSessionAsync(
             settings.PreferredLanguage, settings.RoutingMode,
-            provider: null, privacyRequired: settings.PrivacyRequired, ct).ConfigureAwait(false);
+            provider: string.IsNullOrEmpty(preferredProvider) ? null : preferredProvider,
+            privacyRequired: settings.PrivacyRequired, ct).ConfigureAwait(false);
         if (!started)
         {
             _ui.Post(() => _sink.SetStatusNote("could not start the transcription stream"));
@@ -217,6 +222,18 @@ public sealed class DictationSession : IDisposable
         {
             case WsStartedEvent started:
                 sink.SetSessionId(string.IsNullOrEmpty(started.SessionId) ? null : started.SessionId);
+                // Name the provider the server actually chose. A pinned provider
+                // is only a request — privacy policy may substitute a local one,
+                // and the clinician should see that rather than guess which
+                // engine transcribed their patient.
+                if (!string.IsNullOrWhiteSpace(started.Provider))
+                {
+                    var mode = string.IsNullOrWhiteSpace(started.Mode) ? null : started.Mode.Trim();
+                    sink.SetStatusNote(
+                        mode is null
+                            ? $"live · {started.Provider.Trim()}"
+                            : $"live · {started.Provider.Trim()} · {mode}");
+                }
                 break;
             case WsInterimEvent interim:
                 sink.SetInterim(interim.Text);

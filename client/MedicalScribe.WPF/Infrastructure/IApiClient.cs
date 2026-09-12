@@ -26,6 +26,16 @@ public interface IApiClient
     Task<VersionDto?> GetVersionAsync(CancellationToken ct = default);
     Task<ClientManifestDto?> GetManifestAsync(CancellationToken ct = default);
     Task<IReadOnlyList<ProviderInfoDto>> GetProvidersAsync(bool probeHealth = false, CancellationToken ct = default);
+
+    /// <summary>Live model catalog for a provider that declares
+    /// <see cref="ProviderInfoDto.SupportsModelDiscovery"/> (9Router).
+    /// <paramref name="kind"/> is "llm" or "stt". A provider that is unknown,
+    /// has no catalog, or is not configured server-side surfaces as an
+    /// <see cref="ApiException"/> carrying the server's own message — callers
+    /// display <see cref="ApiException.DetailMessage"/>.</summary>
+    Task<ProviderModelCatalogDto?> GetProviderModelsAsync(
+        string provider, string kind = "llm", CancellationToken ct = default);
+
     Task<TokenPairDto> LoginAsync(LoginRequestDto request, CancellationToken ct = default);
 
     /// <summary>Phase 8: rotate the token pair (one-time refresh token);

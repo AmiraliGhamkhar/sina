@@ -96,6 +96,36 @@ class LlamaServerConfig(BaseModel):
     streaming: bool = True
 
 
+class NineRouterLlmConfig(BaseModel):
+    """9Router (github.com/decolua/9router) — self-hosted proxy fronting 40+
+    upstream LLM providers behind one OpenAI-compatible API with account
+    rotation and auto-fallback.
+
+    Routes only once ``base_url`` is set. The API key is optional: 9Router
+    serves unauthenticated requests unless it was started with
+    ``REQUIRE_API_KEY=true``. Model ids are ``provider/model``
+    (e.g. ``claude/claude-sonnet-4``); discover the live catalog with
+    ``GET /api/v1/providers/9router/models?kind=llm``.
+    """
+
+    #: e.g. http://127.0.0.1:20128 — 9Router's own default port
+    base_url: str | None = None
+    #: "provider/model"; empty → the adapter raises a clear configuration error
+    model: str = ""
+    api_key: SecretStr | None = None
+    #: Next.js route prefix holding the OpenAI-compatible endpoints. Set "" if
+    #: a reverse proxy already rewrites /v1/* onto 9Router.
+    api_prefix: str = "/api"
+    timeout_s: float = 120.0
+    max_retries: int = 2
+    streaming: bool = True
+    latency_hint_ms: int = 2000
+    #: 9Router normally runs inside the deployment boundary → LOCAL, so it can
+    #: serve privacy-required encounters. Set "cloud" if your instance relays
+    #: to cloud accounts and private dictation must avoid it.
+    privacy_class: Literal["local", "cloud"] = "local"
+
+
 class CloudLlmConfig(BaseModel):
     """Phase 4 providers. Keys are read server-side only."""
 
@@ -145,6 +175,7 @@ class CloudLlmConfig(BaseModel):
 
 class LlmConfig(BaseModel):
     llama_server: LlamaServerConfig = Field(default_factory=LlamaServerConfig)
+    nine_router: NineRouterLlmConfig = Field(default_factory=NineRouterLlmConfig)
     cloud: CloudLlmConfig = Field(default_factory=CloudLlmConfig)
     default_provider: str | None = None  # registry name; None → router decides
     #: note-drafting knobs (POST /api/v1/reports/{encounter}/draft)
@@ -225,7 +256,10 @@ class ModelsConfig(BaseModel):
 
 class SpeechmaticsConfig(BaseModel):
     api_key: SecretStr | None = None
-    region: str = "eu2"  # eu2 | us
+    #: realtime cluster: eu | us | au | global (auto-routes to the nearest
+    #: region). Legacy eu2/us2 name *Batch* enterprise clusters and alias to
+    #: eu/us for realtime. ``rt_url``/``batch_url`` override either outright.
+    region: str = "eu2"
     batch_url: str | None = None  # override (defaults from region)
     rt_url: str | None = None
     language: str = "fa"  # batch default; per-request language wins
@@ -234,6 +268,57 @@ class SpeechmaticsConfig(BaseModel):
     job_poll_interval_s: float = 1.0
     job_timeout_s: float = 300.0
     max_retries: int = 2
+    # -- realtime WebSocket (StartRecognition.transcription_config) -----------
+    #: seconds between end of a spoken word and the final result; the API
+    #: documents 0.7–4 and the adapter clamps out-of-range values.
+    max_delay: float = 3.5
+    #: AddPartialTranscript → live interims in the WPF transcript pane
+    enable_partials: bool = True
+    #: none | speaker | channel | channel_and_speaker
+    diarization: str = "none"
+    #: specialized realtime model (e.g. "medical"); None → reuse
+    #: operating_domain unless it is the neutral "general"
+    rt_domain: str | None = None
+    #: PCM sample rate declared in audio_format (the WS pipeline is 16 kHz mono)
+    rt_sample_rate: int = 16000
+    #: medical hotwords → transcription_config.additional_vocab. Note the API
+    #: warns a large list can delay session start by up to 15 s.
+    additional_vocab: list[str] = []
+    #: generous by default: additional_vocab can hold up RecognitionStarted
+    handshake_timeout_s: float = 20.0
+    rt_idle_timeout_s: float = 30.0
+
+
+class NineRouterSttConfig(BaseModel):
+    """9Router STT — Whisper-compatible ``POST /api/v1/audio/transcriptions``
+    relayed to whichever upstream the ``provider/model`` id names (Groq
+    Whisper, HuggingFace, Deepgram, AssemblyAI, Nvidia NIM, Gemini, …).
+
+    9Router's transcription endpoint is request/response, so live dictation
+    uses the shared VAD-windowed pseudo-streaming (same as ``whisper-local``).
+    Discover the live catalog with
+    ``GET /api/v1/providers/9router/models?kind=stt``.
+    """
+
+    base_url: str | None = None  # e.g. http://127.0.0.1:20128
+    model: str = ""  # "provider/model", e.g. groq/whisper-large-v3-turbo
+    api_key: SecretStr | None = None
+    api_prefix: str = "/api"
+    timeout_s: float = 300.0
+    #: "verbose_json" asks OpenAI-compatible upstreams for timed segments;
+    #: relays that ignore it answer {"text": …} and the adapter degrades.
+    response_format: str = "verbose_json"
+    #: baseline medical hotwords → Whisper ``prompt``; per-request context
+    #: hints are appended to this
+    hotwords: list[str] = []
+    latency_hint_ms: int = 1500
+    privacy_class: Literal["local", "cloud"] = "local"
+    # shared VadSegmenter semantics (ai/stt/_common.py)
+    vad_silence_ms: int = 600
+    vad_interim_ms: int = 1500
+    vad_pre_roll_ms: int = 300
+    vad_threshold: float = 0.02
+    max_segment_ms: int = 30000
 
 
 class DeepgramConfig(BaseModel):
@@ -257,6 +342,7 @@ class SttConfig(BaseModel):
     shenava: ShenavaConfig = Field(default_factory=ShenavaConfig)
     speechmatics: SpeechmaticsConfig = Field(default_factory=SpeechmaticsConfig)
     deepgram: DeepgramConfig = Field(default_factory=DeepgramConfig)
+    nine_router: NineRouterSttConfig = Field(default_factory=NineRouterSttConfig)
     #: batch transcribe upload cap in bytes (413 beyond this)
     batch_max_bytes: int = 64 * 1024 * 1024
 
@@ -355,6 +441,19 @@ class Settings(BaseSettings):
                 "max_retries": ls.max_retries,
                 "streaming": ls.streaming,
             }
+        if kind == "llm" and name == "9router":
+            nr = self.llm.nine_router
+            return {
+                "base_url": nr.base_url or "",
+                "model": nr.model,
+                "api_key": nr.api_key.get_secret_value() if nr.api_key else None,
+                "api_prefix": nr.api_prefix,
+                "timeout_s": nr.timeout_s,
+                "max_retries": nr.max_retries,
+                "streaming": nr.streaming,
+                "latency_hint_ms": nr.latency_hint_ms,
+                "privacy_class": nr.privacy_class,
+            }
         if kind == "llm" and name == "mock":
             return {}
         cl = self.llm.cloud
@@ -442,6 +541,15 @@ class Settings(BaseSettings):
                 "job_poll_interval_s": sm.job_poll_interval_s,
                 "job_timeout_s": sm.job_timeout_s,
                 "max_retries": sm.max_retries,
+                # realtime WebSocket (StartRecognition.transcription_config)
+                "max_delay": sm.max_delay,
+                "enable_partials": sm.enable_partials,
+                "diarization": sm.diarization,
+                "rt_domain": sm.rt_domain,
+                "rt_sample_rate": sm.rt_sample_rate,
+                "additional_vocab": list(sm.additional_vocab),
+                "handshake_timeout_s": sm.handshake_timeout_s,
+                "rt_idle_timeout_s": sm.rt_idle_timeout_s,
             }
         if kind == "stt" and name == "deepgram":
             dg = self.stt.deepgram
@@ -453,6 +561,24 @@ class Settings(BaseSettings):
                 "endpointing_ms": dg.endpointing_ms,
                 "timeout_s": dg.timeout_s,
                 "keywords": list(dg.keywords),
+            }
+        if kind == "stt" and name == "9router":
+            nr = self.stt.nine_router
+            return {
+                "base_url": nr.base_url or "",
+                "model": nr.model,
+                "api_key": nr.api_key.get_secret_value() if nr.api_key else None,
+                "api_prefix": nr.api_prefix,
+                "timeout_s": nr.timeout_s,
+                "response_format": nr.response_format,
+                "hotwords": list(nr.hotwords),
+                "latency_hint_ms": nr.latency_hint_ms,
+                "privacy_class": nr.privacy_class,
+                "vad_silence_ms": nr.vad_silence_ms,
+                "vad_interim_ms": nr.vad_interim_ms,
+                "vad_pre_roll_ms": nr.vad_pre_roll_ms,
+                "vad_threshold": nr.vad_threshold,
+                "max_segment_ms": nr.max_segment_ms,
             }
         return {}
 
