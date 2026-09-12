@@ -6,6 +6,11 @@ file was copied verbatim; several *patterns* were adapted and are marked where
 they occur. All reference licenses below are permissive; where adaptation is
 substantial the file header carries a pointer back here.
 
+A fifth reference — **9Router** — was consulted for its *public API shape*
+during the provider-expansion pass. It is not vendored, not a dependency and
+no code was copied from it; it appears in the table below so the attribution
+index stays complete.
+
 ## Reference repositories
 
 | Repo | License | What we took | What we rejected |
@@ -14,6 +19,7 @@ substantial the file header carries a pointer back here.
 | Phlox | MIT © 2024 Filipe Gonsalves | FastAPI route/middleware organization, template-driven clinical documentation concepts, unified OpenAI-compatible LLM client, JSON-repair for local models, upload-transcribe endpoint shape | Tauri/React frontend, SQLite config-manager persistence, scheduler-based cleanup |
 | Open Medical Scribe | MIT © 2025 Birger Moell | batch-vs-streaming provider families, provider factories + result adapter idea, prompt framing (grounding + warnings + follow-up questions), JSONL audit logging, VAD-windowed local streaming plan | Node/Express runtime (backend must be Python-native), Electron process-spawning of llama.cpp, redact-then-cloud privacy posture |
 | Multi-Model-Gateway | MIT (README §License) | pure routing decision function separated from IO, descriptor→adapter registry, masked key display, sliding-window rate limiting with degrade-open note, Fernet secret storage plan | agents/research/images feature surface, arq chat queues (WS streams instead), OpenRouter coupling |
+| 9Router | MIT © 2024-2026 decolua and contributors (repo `LICENSE`, branch `master`) | *Shape-only* reference for the provider-expansion pass: its OpenAI-compatible HTTP surface under `/api/v1`, optional bearer/`x-api-key` auth, `provider/model` id convention and Whisper-compatible transcription endpoint informed `ai/nine_router_client.py` + the `9router` LLM/STT adapters | not vendored, not a dependency, no code copied — its Next.js runtime, free-tier upstream coupling and client-side key handling all rejected (secrets stay server-side) |
 
 ## Files carrying adapted patterns (attribution headers in source)
 
@@ -62,7 +68,7 @@ model's license:
 
 ## License texts (required attribution)
 
-### MIT License (applies to all four references above)
+### MIT License (applies to all five references above)
 
 ```
 Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -86,6 +92,10 @@ SOFTWARE.
 
 Full texts: `phlox/LICENSE`, `open-medical-scribe/LICENSE`,
 `speaktype/installer/LICENSE.txt`, `Multi-Model-Gateway/README.md` (§License: MIT).
+9Router is referenced but **not vendored** (no checkout, no copied code, no
+dependency), so its MIT text — `github.com/decolua/9router/blob/master/LICENSE`,
+"MIT License / Copyright (c) 2024-2026 decolua and contributors" — is
+recorded here by pointer rather than reproduced as a vendored copy.
 
 ## Third-party runtime dependencies (client & server)
 

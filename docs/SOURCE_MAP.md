@@ -168,3 +168,30 @@ patterns carry in-file attribution headers.
   pipeline is honest end-to-end without keys.
 - Cloud LLM wires (OpenAI/Anthropic/Gemini) implemented from public API
   shapes, fixture-verified; SDKs deliberately avoided (httpx-only rule).
+
+## Provider-expansion usage log (2026-09-12)
+
+- **9Router** (github.com/decolua/9router, MIT © decolua) — consulted as an
+  *API-shape reference only*: no local checkout under `/sina`, no code copied,
+  no dependency added. Its documented OpenAI-compatible surface under
+  `/api/v1` (`chat/completions`, `messages`, `models`, `models/{kind}`,
+  `audio/transcriptions`) and its auth rule (`Authorization: Bearer` /
+  `x-api-key` **only** when `REQUIRE_API_KEY=true`) drove
+  `ai/nine_router_client.py`, `ai/llm/nine_router.py` and
+  `ai/stt/nine_router.py`. Model ids are `provider/model`, which is why the
+  catalog is *discovered* rather than configured. The "one gateway fronts many
+  upstreams" idea is the same pattern already taken from
+  Multi-Model-Gateway — this added a concrete adapter, not a new concept.
+- **Speechmatics realtime** (docs.speechmatics.com, public API reference) —
+  `ai/stt/speechmatics.py`'s WebSocket path was re-aligned to the *current*
+  published protocol: `StartRecognition` → `RecognitionStarted` → binary
+  `AddAudio` → `AddPartialTranscript`/`AddTranscript` → `EndOfStream`
+  (with `last_seq_no`) → `EndOfTranscript`, `transcription_config` carrying
+  `language`/`max_delay`/`enable_partials`/`domain`/`diarization`/
+  `additional_vocab`, and the documented close-code mapping
+  (4001/4003 → `ProviderError`; 1011/4005/4013 → `ProviderUnavailableError`).
+  The **batch job API was deliberately left untouched** in this pass. Still
+  httpx + the existing `WsTransport` seam — no SDK, no copied code; the
+  protocol is pinned by fixture tests in `tests/test_stt_speechmatics.py`.
+- Nothing above is vendored, so `docs/THIRD_PARTY_NOTICES.md` gains only a
+  reference-table row (MIT, shape-only) and no license text.

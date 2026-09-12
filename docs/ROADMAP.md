@@ -292,6 +292,92 @@ Done notes (deviations recorded honestly):
   client settings remains a manual review item (no global TLS-bypass flags
   exist — verified).
 
+## Phase 9 — Provider expansion ✅ (done in this build — see honesty ledger)
+
+Requested scope: add **9Router** (LLM *and* STT) to backend + client, and fix
+the **Speechmatics realtime** WebSocket path against the current published
+protocol. Explicit client-side configuration, not discovery alone.
+
+- Shared plumbing `ai/nine_router_client.py`: base-URL normalization
+  (accepts `http://host:20128`, `…/api`, `…/api/v1`), optional auth — 9Router
+  accepts `Authorization: Bearer` or `x-api-key`, we send Bearer and only when
+  a key is configured, since a keyless instance is a valid setup —
+  `resolve_model_id` (a bare model name is *our* config error, reported as
+  such rather than passed through as a 400 from the proxy), and
+  `parse_models_payload` (reads `data` / `models` / `results` or a bare list;
+  entries as objects with `id` or as plain strings; unknown shapes degrade to
+  an empty list, because discovery is advisory and never on the audio path).
+- `ai/llm/nine_router.py` — `NineRouterProvider`: OpenAI-compatible
+  `POST {base}/api/v1/chat/completions` with streaming SSE, implemented as a
+  thin configuration of the existing `OpenAICompatClient` (one transport, one
+  retry policy, one data-hygiene story) rather than a second HTTP stack.
+  Health + catalog via `GET {base}/api/v1/models`; an instance with no
+  connected accounts answers 200 with an empty list, reported as *healthy but
+  unusable* so AI Settings can explain why drafting fails.
+- `ai/stt/nine_router.py` — `NineRouterSttProvider`: Whisper-compatible
+  `POST {base}/api/v1/audio/transcriptions` multipart (file + `model`,
+  `response_format`, `temperature`, optional `language` and a medical-hotword
+  `prompt`), parses upstream `verbose_json` timed segments or falls back to
+  `{text}` as one span; `stream()` slices through the shared `VadSegmenter`
+  (9Router exposes no realtime WS). Health via
+  `GET {base}/api/v1/models/stt`.
+- Both registered `PrivacyClass.LOCAL` by default (a 9Router box normally
+  listens on `127.0.0.1:20128` on the operator's machine) so they stay
+  eligible under `privacy_required`; `privacy_class: cloud` is an explicit
+  opt-out, an unrecognised value warns and falls back to LOCAL.
+- `ai/stt/speechmatics.py` realtime rewritten to the current v2 protocol:
+  `StartRecognition` → `RecognitionStarted` → binary `AddAudio` →
+  `AddPartialTranscript`/`AddTranscript` → `EndOfStream{last_seq_no}` →
+  `EndOfTranscript`; `transcription_config` carries `language`, `max_delay`
+  (0.7–4), `enable_partials`, optional `domain`/`diarization`/
+  `additional_vocab`; regions `global`/`eu`/`us`/`au` plus `eu1`/`us1`/`au1`
+  and `eu2`/`us2` aliases, `max_delay` clamped into the documented [0.7, 4].
+  Two real bugs fixed on the way: a literal `"None"` leaking into the domain
+  field, and `attaches_to` glue breaking "both" and hyphenated words.
+  Close-code mapping: 4001/4003 → `ProviderError`; 1011/4005/4013 →
+  `ProviderUnavailableError` (retryable, handshake-retry friendly).
+- Live catalog discovery: `ProviderDescriptor.supports_model_discovery`,
+  `GET /api/v1/providers/{name}/models?kind=llm|stt`, `ProviderModelCatalog` /
+  `ProviderModelInfo` schemas. Loud failures (404/501/409/502/504) instead of
+  a silently blank dropdown; never echoes config beyond the model id.
+- Config + `.env.example`: `MS_LLM__NINE_ROUTER__*`, `MS_STT__NINE_ROUTER__*`
+  and Speechmatics realtime knobs.
+- **WPF client (explicit UI, secret-free by design)**: `PreferredSttProvider`
+  in `AppSettings` → sent as `session.start.provider`; `session.started`'s
+  provider is surfaced in the status note so the clinician sees what the
+  *server* actually chose; AI Settings gained an STT-provider picker
+  (configured + streaming providers only, a saved-but-unavailable preference
+  falls back with a warning and is left intact rather than silently
+  overwritten) and a **9Router** card that lists the live LLM/STT catalogs.
+  `GetProviderModelsAsync` on `IApiClient`/`ApiClient`; DTOs in
+  `ServerModels.cs`.
+- Tests: `tests/test_nine_router.py`, rewritten `tests/test_stt_speechmatics.py`
+  (documented protocol), `tests/test_providers_route.py` (catalog endpoint
+  contract); client-side `AiSettingsViewModelTests.cs` (~17) plus
+  started-frame assertions in `DictationProjectionTests.cs`. Backend suite
+  green, `ruff` clean.
+- Done-notes (honesty ledger):
+  - **No adapter was exercised against a live service.** 9Router was not
+    installed and no Speechmatics account was used — both are implemented from
+    the projects' published API shapes and pinned by network-free fixture
+    tests (`ScriptedTransport`/`MockTransport`). A first real-world run may
+    still surface wire-level surprises (exact `verbose_json` shape per
+    upstream, 9Router auth header preference).
+  - **The Speechmatics *batch* job API was deliberately left untouched** in
+    this pass, per scope — it remains on its older shape and is now the known
+    gap in that adapter.
+  - **The WPF client was not compiled in this sandbox**: no .NET SDK is
+    installed and the `dotnet-install.sh` download is blocked, so CI
+    (`client-linux` compile gate + `client-windows` build/xunit) is the
+    authority on these C#/XAML changes. They were reviewed and cross-checked
+    by hand (interface-member parity, XAML well-formedness, every `{Binding}`
+    root resolving to a ViewModel member) but not built locally.
+  - 9Router's STT `list_models()` requires the per-kind route
+    `GET /api/v1/models/stt`. There is **no** fallback that filters
+    `/api/v1/models` — a build without that route yields a loud `ProviderError`
+    (surfaced as `502` from the catalog endpoint) instead of a plausible-looking
+    but wrong LLM-only list.
+
 ## Standing engineering constraints (all phases)
 
 - WPF never talks to providers; no secrets in client; REST/WS protocol v1
