@@ -59,7 +59,7 @@ public interface ITranscriptionStream : IAsyncDisposable
     Task<bool> StopSessionAsync(TimeSpan timeout, CancellationToken ct = default);
 }
 
-public sealed class WsTranscriptionClient : ITranscriptionStream
+public sealed class WsTranscriptionClient : ITranscriptionStream, IDisposable
 {
     public const int SendQueueFrames = 16; // ~1.6 s of 100 ms chunks max queued
     private static readonly TimeSpan HandshakeTimeout = TimeSpan.FromSeconds(5);
@@ -519,6 +519,20 @@ public sealed class WsTranscriptionClient : ITranscriptionStream
         SetState(StreamState.Faulted);
     }
 
+    // Dual-disposal pattern (MS.DI semantics): the DI container calls the SYNC
+    // Dispose() when it shuts down via ServiceProvider.Dispose() — and *throws*
+    // InvalidOperationException if a resolved service offers DisposeAsync only.
+    // That turned every normal app exit into an unhandled exception in OnExit.
+    // Sync path: abortive local cleanup, no network wait. Async path: graceful
+    // close frame first, then the same cleanup. Both are one-shot.
+    private bool _disposed;
+
+    public void Dispose()
+    {
+        _sessionWanted = false;
+        CleanupOnce();
+    }
+
     public async ValueTask DisposeAsync()
     {
         _sessionWanted = false;
@@ -533,10 +547,21 @@ public sealed class WsTranscriptionClient : ITranscriptionStream
         }
         catch (Exception)
         {
-            // best effort
+            // best effort — teardown continues either way
         }
+        CleanupOnce();
+    }
+
+    private void CleanupOnce()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+        _disposed = true;
         CleanupSocket();
         _audio.Writer.TryComplete();
         _sendLock.Dispose();
+        GC.SuppressFinalize(this);
     }
 }

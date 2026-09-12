@@ -158,7 +158,7 @@ dotnet run --project MedicalScribe.WPF
 ## 5. Run the tests
 
 ```powershell
-python -m pytest                                        # 321 tests
+python -m pytest                                        # 402 collected (backend + AI layer)
 python -m ruff check ai backend tests                   # lint
 ```
 
@@ -173,7 +173,9 @@ Easiest path to a full stack (API + Postgres + Redis) — no Python install need
 ```powershell
 Copy-Item .env.example .env      # edit MS_AUTH__JWT_SECRET like in step 3c
 docker compose up --build        # add: --profile monitoring  for Prometheus + Grafana
-                                 # add: --profile llm         for a local llama-server (needs models\model.gguf)
+                                 # add: --profile llm         for a local llama-server (GGUF named by
+                                 #                            MS_LLM_GGUF under models/ — download from the
+                                 #                            client's AI Models screen; see docs/MODELS.md)
 ```
 
 The API is then on <http://localhost:8000> — `docker compose logs -f api` to

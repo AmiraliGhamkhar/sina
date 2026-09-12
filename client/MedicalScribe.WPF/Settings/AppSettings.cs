@@ -86,7 +86,17 @@ public sealed class JsonSettingsStore : ISettingsStore
         var dir = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
             "MedicalScribe");
-        Directory.CreateDirectory(dir);
+        // An inaccessible %APPDATA% must not brick the app (audit: settings
+        // dir failure): run with in-memory defaults; Save() retries lazily.
+        try
+        {
+            Directory.CreateDirectory(dir);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // FilePath still points at the standard location — Load() will
+            // just see "no file" and hand back defaults.
+        }
         FilePath = Path.Combine(dir, "settings.json");
     }
 
@@ -125,9 +135,15 @@ public sealed class JsonSettingsStore : ISettingsStore
             {
                 Directory.CreateDirectory(directory);
             }
-            File.WriteAllText(FilePath, JsonSerializer.Serialize(Current, Options));
+            // Atomic write: serialize to a sibling temp file, then replace.
+            // A crash mid-write used to leave a truncated settings.json;
+            // Load() recovers from corruption, but never losing the file is
+            // better than recovering from losing it.
+            var tempPath = FilePath + ".tmp";
+            File.WriteAllText(tempPath, JsonSerializer.Serialize(Current, Options));
+            File.Move(tempPath, FilePath, overwrite: true);
         }
-        catch (IOException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             // settings save is best-effort; the UI already holds the new values
         }
