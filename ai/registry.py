@@ -62,6 +62,10 @@ class ProviderDescriptor:
     description: str = ""
     #: predicate name for audit output ("config.llama_server_url" etc.)
     config_keys: tuple[str, ...] = ()
+    #: the adapter implements ``list_models(kind)`` and can answer
+    #: ``GET /api/v1/providers/{name}/models`` with a live catalog. Declared
+    #: statically so listings never have to construct a provider to find out.
+    supports_model_discovery: bool = False
     configured: Callable[[Mapping[str, Any]], bool] = field(
         default=lambda _cfg: True
     )
@@ -155,18 +159,29 @@ class ProviderRegistry:
 def build_default_registry() -> ProviderRegistry:
     """Registry with the providers bundled in this repo.
 
-    Phase 3 added the STT adapters above (whisper-local, qwen-asr, deepgram,
-    speechmatics). Remaining: openai / anthropic / gemini (cloud LLM, Phase 4).
+    STT: mock, whisper-local, qwen-asr, shenava, deepgram, speechmatics,
+    9router. LLM: mock, llama-server, openai, anthropic, gemini, 9router.
+
+    ``9router`` (https://github.com/decolua/9router) is registered under *both*
+    kinds: the self-hosted proxy exposes an OpenAI-compatible
+    ``/api/v1/chat/completions`` and a Whisper-compatible
+    ``/api/v1/audio/transcriptions`` over the same base URL, fronting 40+
+    upstreams with account rotation. Both adapters declare
+    ``supports_model_discovery`` because 9Router's catalog is dynamic — it
+    reflects whichever upstream accounts the operator has connected.
+
     Each addition stays a single ``register()`` call plus a module under
-    file should need to change.
+    ``ai/llm`` or ``ai/stt``; no other file should need to change.
     """
     from ai.llm.anthropic import AnthropicProvider, anthropic_configured
     from ai.llm.gemini import GeminiProvider, gemini_configured
     from ai.llm.llama_server import LlamaServerProvider, llama_server_configured
     from ai.llm.mock import MockLlmProvider
+    from ai.llm.nine_router import NineRouterProvider, nine_router_configured
     from ai.llm.openai import OpenAIProvider, openai_configured
     from ai.stt.deepgram import DeepgramProvider, deepgram_configured
     from ai.stt.mock import MockSttProvider
+    from ai.stt.nine_router import NineRouterSttProvider, nine_router_stt_configured
     from ai.stt.qwen_asr import QwenAsrProvider, qwen_asr_configured
     from ai.stt.shenava import ShenavaProvider, shenava_configured
     from ai.stt.speechmatics import SpeechmaticsProvider, speechmatics_configured
@@ -292,6 +307,30 @@ def build_default_registry() -> ProviderRegistry:
     )
     registry.register(
         ProviderDescriptor(
+            name="9router",
+            kind=ProviderKind.STT,
+            capabilities=ProviderCapabilities(
+                privacy=PrivacyClass.LOCAL,
+                supports_streaming=True,
+                supports_batch=True,
+                languages=("*",),
+                latency_hint_ms=1500,
+                extra={"router": "9router", "streaming_mode": "vad-windowed"},
+            ),
+            factory=lambda cfg: NineRouterSttProvider(cfg),
+            configured=nine_router_stt_configured,
+            supports_model_discovery=True,
+            description=(
+                "Self-hosted 9Router proxy (github.com/decolua/9router): Whisper-compatible "
+                "POST /api/v1/audio/transcriptions relayed to 40+ upstreams with automatic "
+                "account fallback. VAD-windowed pseudo-streaming. Configure "
+                "MS_STT__NINE_ROUTER__BASE_URL + __MODEL (form 'provider/model')."
+            ),
+            config_keys=("stt.nine_router.base_url", "stt.nine_router.model"),
+        )
+    )
+    registry.register(
+        ProviderDescriptor(
             name="openai",
             kind=ProviderKind.LLM,
             capabilities=ProviderCapabilities(
@@ -372,6 +411,29 @@ def build_default_registry() -> ProviderRegistry:
             ),
             config_keys=("llama_server.base_url",),
             configured=llama_server_configured,
+        )
+    )
+    registry.register(
+        ProviderDescriptor(
+            name="9router",
+            kind=ProviderKind.LLM,
+            capabilities=ProviderCapabilities(
+                privacy=PrivacyClass.LOCAL,
+                supports_streaming=True,
+                languages=("*",),
+                latency_hint_ms=2000,
+                extra={"router": "9router", "transport": "openai-compatible-http"},
+            ),
+            factory=lambda cfg: NineRouterProvider(cfg),
+            configured=nine_router_configured,
+            supports_model_discovery=True,
+            description=(
+                "Self-hosted 9Router proxy (github.com/decolua/9router): OpenAI-compatible "
+                "POST /api/v1/chat/completions fronting 40+ upstreams (Claude/GPT/Gemini/…) "
+                "with account rotation and auto-fallback. Configure "
+                "MS_LLM__NINE_ROUTER__BASE_URL + __MODEL (form 'provider/model')."
+            ),
+            config_keys=("llm.nine_router.base_url", "llm.nine_router.model"),
         )
     )
     return registry

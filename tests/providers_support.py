@@ -3,6 +3,7 @@ recorded-fixture loading, synthetic speech builders. No network anywhere.
 """
 from __future__ import annotations
 
+import asyncio
 import io
 import json
 import wave
@@ -18,13 +19,19 @@ def load_fixture(name: str):
     return json.loads((FIXTURES / name).read_text(encoding="utf-8"))
 
 
+def _encode(messages: list) -> deque:
+    """Queue messages as the wire sees them; exceptions pass through so a test
+    can script a transport failure (close code, socket error) mid-stream."""
+    return deque(
+        m if isinstance(m, (str, bytes, BaseException)) else json.dumps(m) for m in messages
+    )
+
+
 class ScriptedTransport(WsTransport):
     """Server stand-in: replays queued messages, records client traffic."""
 
     def __init__(self, messages: list) -> None:
-        self._q: deque = deque(
-            m if isinstance(m, (str, bytes)) else json.dumps(m) for m in messages
-        )
+        self._q: deque = _encode(messages)
         self.sent: list = []  # ("text"|"bytes", payload)
         self.closed = False
 
@@ -38,9 +45,41 @@ class ScriptedTransport(WsTransport):
         if not self._q:
             raise ConnectionClosed("script exhausted")
         item = self._q.popleft()
-        if isinstance(item, Exception):
+        if isinstance(item, BaseException):
             raise item
         return item
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+class BlockingTransport(WsTransport):
+    """Replays a short handshake, then ``recv`` stalls forever.
+
+    Drives idle-timeout paths deterministically: the adapter's own
+    ``asyncio.wait_for`` cancels the sleep and surfaces its timeout, so no
+    test has to wait for a real network to go quiet.
+    """
+
+    def __init__(self, handshake: list | None = None) -> None:
+        self._q: deque = _encode(handshake or [])
+        self.sent: list = []
+        self.closed = False
+
+    async def send_text(self, payload: str) -> None:
+        self.sent.append(("text", payload))
+
+    async def send_bytes(self, payload: bytes) -> None:
+        self.sent.append(("bytes", payload))
+
+    async def recv(self) -> str | bytes:
+        if self._q:
+            item = self._q.popleft()
+            if isinstance(item, BaseException):
+                raise item
+            return item
+        await asyncio.sleep(3600)  # cancelled by the adapter's wait_for
+        raise ConnectionClosed("unreachable")  # pragma: no cover
 
     async def close(self) -> None:
         self.closed = True
