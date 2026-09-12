@@ -77,13 +77,63 @@ public sealed record ProviderHealthDto(
     [property: JsonPropertyName("latency_ms")] double? LatencyMs,
     [property: JsonPropertyName("detail")] string? Detail);
 
+/// <summary>Registry metadata for one provider, as exposed by
+/// GET /api/v1/providers. Never contains secrets or raw config.</summary>
+/// <param name="SupportsModelDiscovery">The provider can answer
+/// GET /providers/{name}/models with a live catalog (9Router does — its ids
+/// depend on which upstream accounts the operator connected). Older servers
+/// omit the field, so it defaults to false.</param>
 public sealed record ProviderInfoDto(
     [property: JsonPropertyName("name")] string Name,
     [property: JsonPropertyName("kind")] string Kind,
     [property: JsonPropertyName("description")] string Description,
     [property: JsonPropertyName("configured")] bool Configured,
     [property: JsonPropertyName("health")] ProviderHealthDto? Health,
-    [property: JsonPropertyName("capabilities")] ProviderCapabilitiesDto Capabilities);
+    [property: JsonPropertyName("capabilities")] ProviderCapabilitiesDto Capabilities,
+    [property: JsonPropertyName("supports_model_discovery")] bool SupportsModelDiscovery = false);
+
+/// <summary>One entry of a provider's live model catalog. 9Router ids are
+/// "provider/model" (claude/claude-sonnet-4, groq/whisper-large-v3-turbo).</summary>
+/// <param name="OwnedBy">Upstream provider within the router.</param>
+/// <param name="ContextLength">Context window, when the router reports one.</param>
+/// <param name="MaxCompletionTokens">Output cap, when the router reports one.</param>
+public sealed record ProviderModelDto(
+    [property: JsonPropertyName("id")] string Id,
+    [property: JsonPropertyName("kind")] string Kind = "llm",
+    [property: JsonPropertyName("owned_by")] string? OwnedBy = null,
+    [property: JsonPropertyName("context_length")] int? ContextLength = null,
+    [property: JsonPropertyName("max_completion_tokens")] int? MaxCompletionTokens = null)
+{
+    /// <summary>Grouping key for the picker — the upstream, derived from
+    /// <see cref="OwnedBy"/> or from the "provider/model" prefix.</summary>
+    public string Group
+    {
+        get
+        {
+            if (!string.IsNullOrWhiteSpace(OwnedBy))
+            {
+                return OwnedBy!;
+            }
+            var slash = Id.IndexOf('/');
+            return slash > 0 ? Id[..slash] : "other";
+        }
+    }
+
+    /// <summary>Compact label: id plus the context window when known.</summary>
+    public string Display => ContextLength is > 0
+        ? $"{Id}  ·  {ContextLength / 1000}k ctx"
+        : Id;
+}
+
+/// <summary>Response of GET /api/v1/providers/{name}/models.</summary>
+/// <param name="ConfiguredModel">The model the server is configured to use. A
+/// model id is not a secret; nothing else from the provider config is ever
+/// exposed to the client.</param>
+public sealed record ProviderModelCatalogDto(
+    [property: JsonPropertyName("provider")] string Provider,
+    [property: JsonPropertyName("kind")] string Kind,
+    [property: JsonPropertyName("configured_model")] string? ConfiguredModel,
+    [property: JsonPropertyName("models")] List<ProviderModelDto> Models);
 
 public sealed record LoginRequestDto(
     [property: JsonPropertyName("username")] string Username,

@@ -29,6 +29,13 @@ public sealed class AppSettings
     public string PreferredLanguage { get; set; } = "fa-en";
     public string RoutingMode { get; set; } = "auto";
 
+    /// <summary>Explicit STT provider for dictation (session.start.provider) —
+    /// a registry name such as "9router", "speechmatics" or "whisper-local".
+    /// Empty (the default) lets the server's router decide, which is what you
+    /// want unless a clinician has a specific reason to pin one. The server's
+    /// privacy policy still overrides the request.</summary>
+    public string PreferredSttProvider { get; set; } = "";
+
     // Audio (device id from WASAPI endpoint; empty = system default)
     public string MicrophoneId { get; set; } = "";
 

@@ -63,6 +63,15 @@ public sealed class ApiClient : IApiClient
         return list ?? new List<ProviderInfoDto>();
     }
 
+    public Task<ProviderModelCatalogDto?> GetProviderModelsAsync(
+        string provider, string kind = "llm", CancellationToken ct = default) =>
+        // both segments are server-controlled names, but escaping keeps a
+        // provider id containing '/' or spaces from changing the route
+        GetAsync<ProviderModelCatalogDto>(
+            $"/api/v1/providers/{Uri.EscapeDataString(provider)}/models"
+            + $"?kind={Uri.EscapeDataString(kind)}",
+            ct);
+
     public async Task<TokenPairDto> LoginAsync(LoginRequestDto request, CancellationToken ct = default)
     {
         var result = await PostAsync<TokenPairDto>("/api/v1/auth/login", request, ct);

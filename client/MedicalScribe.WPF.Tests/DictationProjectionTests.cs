@@ -111,6 +111,29 @@ public class DictationProjectionTests
     }
 
     [Fact]
+    public void StartedFrameNamesTheProviderTheServerActuallyChose()
+    {
+        // Pinning a provider is a request: the server may substitute a local
+        // engine for a private encounter. The clinician has to see which one
+        // transcribed their patient, so the status note names it.
+        var vm = new LiveTranscriptViewModel();
+        DictationSession.ProjectEvent(
+            new WsStartedEvent("9router", "local", "fa-en") { SessionId = "ws_9" }, vm);
+        Assert.Contains("9router", vm.StatusNote);
+        Assert.Contains("local", vm.StatusNote);
+    }
+
+    [Fact]
+    public void StartedFrameWithoutProviderLeavesTheStatusNoteAlone()
+    {
+        var vm = new LiveTranscriptViewModel();
+        vm.SetStatusNote("connecting transcription stream…");
+        DictationSession.ProjectEvent(
+            new WsStartedEvent("", "", "fa-en") { SessionId = "ws_9" }, vm);
+        Assert.Equal("connecting transcription stream…", vm.StatusNote);
+    }
+
+    [Fact]
     public void NewParagraphCommandInsertsMarkerEntry()
     {
         var vm = new LiveTranscriptViewModel();
